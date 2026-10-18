@@ -23,6 +23,7 @@ esac
 require_root
 require_command docker
 load_deployment_env
+require_local_bind_ipv4 "${BIND_IPV4}"
 
 failed=0
 for service in db app; do
@@ -77,14 +78,14 @@ fi
 
 if command -v curl >/dev/null 2>&1; then
   if ! probe_public_health \
-      "${PUBLIC_HEALTH_SCHEME}" "${PUBLIC_HEALTH_HOST}" "${PUBLIC_IPV4}" 10; then
-    warn "公网入口必须直接返回 200 和精确健康正文，检查失败: ${PUBLIC_HEALTH_URL}"
+      "${PUBLIC_HEALTH_SCHEME}" "${PUBLIC_HEALTH_HOST}" "${BIND_IPV4}" 10; then
+    warn "本机入口必须直接返回 200 和精确健康正文，检查失败: ${PUBLIC_HEALTH_URL}（连接 ${BIND_IPV4}）"
     failed=1
   else
-    log "公网入口严格健康检查通过: ${PUBLIC_HEALTH_URL}"
+    log "本机入口严格健康检查通过: ${PUBLIC_HEALTH_URL}（连接 ${BIND_IPV4}）；公网映射与安全组需另行核验。"
   fi
 else
-  warn "主机未安装 curl，无法执行禁用代理和本地配置的严格公网入口检查。"
+  warn "主机未安装 curl，无法执行禁用代理和本地配置的严格入口检查。"
   failed=1
 fi
 

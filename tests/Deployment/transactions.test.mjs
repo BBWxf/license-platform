@@ -54,7 +54,7 @@ class Fixture {
       'data/rollback', 'backups', 'systemd', 'sbin', 'release/deploy/lib', 'release/deploy/systemd']) {
       fs.mkdirSync(path.join(this.root, dir), { recursive: true });
     }
-    for (const name of ['docker', 'systemctl', 'chown', 'flock', 'sync', 'sudo']) {
+    for (const name of ['docker', 'systemctl', 'chown', 'flock', 'sync', 'sudo', 'ip', 'ss', 'curl', 'getent']) {
       write(path.join(this.root, 'blocked', name), '#!/usr/bin/env bash\nprintf "Host command blocked by fixture\\n" >&2\nexit 97\n');
     }
     this.env = `INSTALL_DIR=${this.p}/home\nCONFIG_DIR=${this.p}/config\nDATA_DIR=${this.p}/data\n` +
@@ -109,13 +109,17 @@ class Fixture {
     })) {
       installer = installer.replace(new RegExp(`readonly ${name}="[^"]+"`), `readonly ${name}="${value}"`);
     }
-    // Remove only host preflight invocations, never transaction logic. Even an
-    // accidental call remains unable to reach Docker/systemctl (shell stubs).
+    // Network preflight is covered separately in networking.test.mjs. Here only
+    // the selected candidate is injected; transaction logic is never replaced.
+    // Unexpected host commands fail closed through stubs or blocked executables.
     for (const name of ['check_os', 'check_resources', 'check_docker', 'check_systemd',
-      'check_public_ip_is_local', 'check_port_80']) {
+      'check_install_ports']) {
       assert(installer.includes(`\n${name}\n`), `missing preflight ${name}`);
       installer = installer.replace(`\n${name}\n`, '\n:\n');
     }
+    assert(installer.includes('\nselect_install_bind_ipv4\n'));
+    installer = installer.replace('\nselect_install_bind_ipv4\n',
+      '\nBIND_IPV4_VALUE="${BIND_IPV4_CLI:-${SAVED_BIND_IPV4:-${PUBLIC_IPV4}}}"\n');
     write(path.join(this.release, 'deploy/install.sh'), installer);
   }
   upgradeState(status = 'SUCCEEDED') {
@@ -130,8 +134,9 @@ class Fixture {
     });
   }
   rollback(extra = {}) { return this.run('rollback.sh', ['--confirm-rollback', 'ROLLBACK-APPLICATION'], extra); }
-  install(extra = {}, local = false) {
+  install(extra = {}, local = false, bind = null) {
     const args = ['--mode', 'http-ip', '--public-ip', '8.8.8.8', '--accept-insecure-http'];
+    if (bind !== null) args.push('--bind-ip', bind);
     if (!local) args.push('--app-image', 'example/web:new');
     return this.run('install.sh', args, extra);
   }
@@ -306,6 +311,72 @@ test('successful installer rerun preserves tuning/secrets and commits its journa
   assert.equal(read(path.join(f.config, 'secrets/master_encryption_key')), 'fixture secret never printed\n');
   assert.equal(read(path.join(f.root, 'timer.enabled')), 'enabled\n');
   assert.equal(read(path.join(f.root, 'timer.active')), 'active\n');
+});
+
+test('initial environment creation persists a private binding with the public identity', t => {
+  const f = new Fixture(t);
+  fs.unlinkSync(f.envFile); // Exercise the first-write path, with no prior env or journal.
+  f.ok(f.install({}, false, '10.42.0.10'));
+  assert.match(read(f.envFile), /^BIND_IPV4=10\.42\.0\.10$/m);
+  assert.match(read(f.envFile), /^PUBLIC_IPV4=8\.8\.8\.8$/m);
+  assert.match(read(f.envFile), /^CADDY_SITE_ADDRESS=http:\/\/8\.8\.8\.8$/m);
+  assert(!f.pending('install.pending'));
+});
+
+test('installer migrates legacy binding using its saved public IP, not an inherited bind', t => {
+  const f = new Fixture(t);
+  f.ok(f.install({ BIND_IPV4: '10.42.0.99' }));
+  assert.match(read(f.envFile), /^BIND_IPV4=8\.8\.8\.8$/m);
+});
+
+test('NAT installer rerun preserves the saved private binding and public identity', t => {
+  const f = new Fixture(t);
+  write(f.envFile, f.env + 'BIND_IPV4=10.42.0.10\n');
+  f.ok(f.install());
+  assert.match(read(f.envFile), /^BIND_IPV4=10\.42\.0\.10$/m);
+  assert.match(read(f.envFile), /^PUBLIC_IPV4=8\.8\.8\.8$/m);
+  assert.match(read(f.envFile), /^CADDY_SITE_ADDRESS=http:\/\/8\.8\.8\.8$/m);
+});
+
+test('explicit binding is committed without altering the public identity or secrets', t => {
+  const f = new Fixture(t);
+  write(f.envFile, f.env + 'BIND_IPV4=10.42.0.10\n');
+  f.ok(f.install({}, false, '192.168.50.20'));
+  assert.match(read(f.envFile), /^BIND_IPV4=192\.168\.50\.20$/m);
+  assert.match(read(f.envFile), /^PUBLIC_IPV4=8\.8\.8\.8$/m);
+  assert.equal(read(path.join(f.config, 'secrets/master_encryption_key')), 'fixture secret never printed\n');
+});
+
+test('failed explicit binding change restores the previous NAT binding', t => {
+  const f = new Fixture(t);
+  write(f.envFile, f.env + 'BIND_IPV4=10.42.0.10\n');
+  f.failed(f.install({ FAIL_MIGRATION: '1' }, false, '192.168.50.20'));
+  f.restoredInstall();
+  assert.match(read(f.envFile), /^BIND_IPV4=10\.42\.0\.10$/m);
+  assert.doesNotMatch(read(f.envFile), /192\.168\.50\.20/);
+});
+
+test('interrupted binding change reloads its saved NAT baseline before any new installation', t => {
+  const f = new Fixture(t);
+  write(f.envFile, f.env + 'BIND_IPV4=10.42.0.10\n');
+  const interrupted = f.install({ CRASH_POINT: 'commit' }, true, '192.168.50.20');
+  assert.notEqual(interrupted.status, 0, f.output(interrupted));
+  assert(f.pending('install.pending'));
+  f.failed(f.install({ BIND_IPV4: '10.42.0.99' }, false, '192.168.50.20'));
+  assert(!f.pending('install.pending'));
+  f.restoredInstall();
+  assert.match(read(f.envFile), /^BIND_IPV4=10\.42\.0\.10$/m);
+});
+
+test('application rollback and its interrupted recovery retain the NAT binding', t => {
+  const f = new Fixture(t);
+  write(f.envFile, f.env + 'BIND_IPV4=10.42.0.10\n');
+  const interrupted = f.rollback({ CRASH_POINT: 'env-switch' });
+  assert.notEqual(interrupted.status, 0, f.output(interrupted));
+  f.failed(f.rollback({ BIND_IPV4: '192.168.50.20' }));
+  assert.match(read(f.envFile), /^BIND_IPV4=10\.42\.0\.10$/m);
+  f.ok(f.rollback({ FIXTURE_TIMESTAMP: '20261018T120001.123456789Z' }));
+  assert.match(read(f.envFile), /^BIND_IPV4=10\.42\.0\.10$/m);
 });
 
 test('all pending marker guards block cross-command mutations and exempt only matching recovery', t => {

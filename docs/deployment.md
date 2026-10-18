@@ -12,7 +12,7 @@
 
 Compose 项目名固定为 `license-platform`，服务名固定为：
 
-- `caddy`：唯一公网入口，当前把服务器固定公网 IPv4 的 TCP 80 反向代理到 `app:8080`；
+- `caddy`：唯一公网入口，宿主机绑定 `BIND_IPV4` 的 TCP 80，使用 `PUBLIC_IPV4` 作为公网访问身份，反向代理到 `app:8080`；
 - `app`：ASP.NET Core 10 Web 应用，仅在 Compose 网络中监听 8080，不发布主机端口；
 - `db`：PostgreSQL 18，仅连接 `backend` 内部网络，不发布主机端口。
 
@@ -37,8 +37,8 @@ Compose 项目名固定为 `license-platform`，服务名固定为：
 - Docker Compose v2，即 `docker compose`；
 - 目标规格至少 2 核、2 GiB 内存；安装器在低于 1.5 GiB 时拒绝，低于约 2 GiB 时警告；
 - 至少 5 GiB 可用磁盘，建议初始留出 10 GiB 以上；
-- 一个**实际配置在本机网络接口上的固定公网 IPv4**；
-- 该 IPv4 的 TCP 80 未被其他进程或容器占用；
+- 一个固定公网 IPv4；可以直接配置在本机，也可以由云平台 NAT/EIP 映射到本机私网 IPv4；
+- 本机监听 IPv4 的 TCP 80 未被其他进程或容器占用；HTTPS 重跑还检查 TCP/UDP 443；
 - 上游防火墙/安全组已按最小来源范围配置。
 
 安装器不会停止、删除、重命名或修改其他 Compose 项目、容器和主机进程。端口冲突时直接退出，由操作者处理。
@@ -89,6 +89,12 @@ sudo ./deploy/install.sh \
   --accept-insecure-http
 ```
 
+**云服务器 NAT/EIP 不需要额外参数或把公网地址添加到网卡。** `PUBLIC_IPV4` 保留公网 Host、域名 DNS 比较和 HTTPS SNI/证书身份；`BIND_IPV4` 是实际属于本机接口的具体单播 IPv4，用于 Docker 端口发布及本机探测连接。
+
+绑定选择顺序：显式 `--bind-ip` → 已保存绑定（旧配置使用其自身 `PUBLIC_IPV4`）→ 本机直接配置的公网 IP → 唯一明确默认出口的本机源 IPv4。路由识别仅查询本地内核，不访问云 metadata 或公网查 IP 服务。没有唯一默认路由、多路径或出口不一致时停止，可追加 `--bind-ip <本机IPv4>` 明确指定；不回退到 `0.0.0.0`，不修改网卡或防火墙。已有绑定失效时也会停止，不自动迁移接口。
+
+两类地址保存在 `/etc/license-platform/deployment.env`。重跑默认保留原绑定；只有明确传入 `--bind-ip` 才更换。云平台仍需将公网端口正确映射到此本机地址，并配置安全组；**本机探测成功不代表外部访问已经通过**。
+
 ### 5.2 使用预构建应用镜像
 
 推荐生产发布使用私有仓库中已审查并固定 digest 的镜像：
@@ -106,8 +112,8 @@ sudo ./deploy/install.sh \
 ### 5.3 安装器实际执行的检查和动作
 
 1. 检查 root、Ubuntu/Debian、systemd、内存、磁盘；
-2. 检查公网 IPv4 格式、保留地址和本机接口归属；
-3. 检查 Docker daemon、Compose v2 和 TCP 80；
+2. 检查公网 IPv4 格式及保留地址，选择并验证本机监听 IPv4；
+3. 检查 Docker daemon、Compose v2 和本机绑定的 TCP 80；HTTPS 重跑同时检查 TCP/UDP 443；
 4. 只在文件不存在时生成秘密，幂等重跑不会轮换已有秘密；
 5. `deployment.env` 保持 `root:root 0600`；secret 文件位于 root-only 父目录中并设为 `root:<SECRETS_GID> 0440`，只让非 root 容器补充组读取；
 6. 拉取固定版本依赖镜像，构建或拉取应用镜像；
@@ -135,10 +141,12 @@ sudo ./deploy/install.sh \
 ### 5.5 不依赖 Docker 的部署回归测试
 
 ```bash
-node --test tests/Deployment/transactions.test.mjs
+node --test tests/Deployment/*.test.mjs
 ```
 
-需要 Node.js 和 Bash（Windows 可通过 `LP_TEST_BASH` 指定 Git Bash 的 `bash.exe`）。测试只在临时目录运行脚本副本，固定全部受管路径，并用 shell 函数替换镜像、Compose、systemd、锁和权限操作；包括源码两次重命名之间、配置替换及提交前的进程强制终止注入。**不会调用 Docker 可执行文件、安装真实服务或修改系统目录。** Windows 还显式模拟受管符号链接；这些结果不证明 Linux root 权限、真实 systemd/镜像/网络健康检查或断电持久性已经验收。
+需要 Node.js 和 Bash（Windows 可通过 `LP_TEST_BASH` 指定 Git Bash 的 `bash.exe`）。事务测试只在临时目录运行脚本副本，固定全部受管路径，并用 shell 函数替换镜像、Compose、systemd、锁和权限操作；网络预检在该 runner 中替换为受控绑定候选，单独由网络 runner 测试，不把事务通过冒充网络覆盖。故障注入包括源码两次重命名之间、配置替换及提交前的进程强制终止，以及 NAT 绑定改写失败和恢复。
+
+网络 runner 使用受控 `ip`、`ss`、`curl` 和只读 Docker 查询 mock，覆盖地址/路由选择、端口冲突、严格 Host/TLS 参数、旧配置回载与恢复预检；Compose 仅静态检查。**不会调用 Docker 可执行文件、安装真实服务、访问公网或修改系统目录。** Windows 还显式模拟受管符号链接；这些结果不证明 Linux root 权限、真实 systemd/镜像/网络/TLS 或断电持久性已经验收。
 
 ## 6. 安装后核验
 
@@ -203,7 +211,9 @@ sudo licensectl enable-https "$PUBLIC_IPV4"
 - 保存原 `deployment.env` 和 Caddyfile 到 `/var/lib/license-platform/rollback/https-*`；
 - 原子写入 `CADDY_SITE_ADDRESS=https://...`、`HTTPS_ENABLED=true`、`ALLOW_INSECURE_HTTP=false`、`HSTS_ENABLED=false`；
 - 加载 `compose.https.yml`，强制重建 app/Caddy，使 Secure Cookie 和 HTTPS 重定向生效；首次切换明确不发送 HSTS；
-- 最多等待 300 秒，以正常系统信任链、固定 `PUBLIC_IPV4`、禁用代理和重定向的方式调用 `https://<目标>/health`。
+- 最多等待 300 秒，以正常系统信任链、禁用代理和重定向的方式调用 `https://<目标>/health`；通过 `curl --connect-to` 固定连接本机 `BIND_IPV4`，保留目标公网 Host、TLS SNI 及证书名称校验（数字 IP URL 同样适用）。
+
+这些是本机入口检查，不验证 EIP 转发、安全组或公网入站路径；还必须从外部客户端核验。
 
 任何步骤失败都会恢复原环境文件和 Caddyfile，并发起 HTTP app/Caddy 重建；命令不会使用 `curl -k` 或忽略证书错误来伪造成功。若进程被中断，下一次执行 `enable-https` 会读取持久事务标记并先恢复经严格检查的 HTTP 基线。成功后更新所有客户端 `ServiceBaseUri`，删除配置、文档和监控中遗留的 `http://` 地址。
 
@@ -215,7 +225,7 @@ HTTPS 切换成功后，至少先完成证书自动续期监控、HTTPS 可用�
 sudo licensectl enable-hsts --confirm-enable-hsts ENABLE-HSTS
 ```
 
-该命令会再次验证 HTTPS 公网基线、创建备份和事务状态，只重建应用，并要求公网 `/health` 响应精确返回 `Strict-Transport-Security: max-age=2592000`（30 天）且不包含 `includeSubDomains`。失败时会恢复服务器配置，但**无法清除浏览器已经缓存的 HSTS**；因此 HSTS 启用后必须持续保证该域名或 IP 的 HTTPS 可用。默认不包含子域名，避免把尚未验证的其他主机一并锁定。
+该命令会再次验证保留公网 TLS 身份的 HTTPS 本机入口基线、创建备份和事务状态，只重建应用，并要求经本机 `BIND_IPV4` 连接的 `/health` 响应精确返回 `Strict-Transport-Security: max-age=2592000`（30 天）且不包含 `includeSubDomains`。失败时会恢复服务器配置，但**无法清除浏览器已经缓存的 HSTS**；因此 HSTS 启用后必须持续保证该域名或 IP 的 HTTPS 可用。默认不包含子域名，避免把尚未验证的其他主机一并锁定。
 
 ## 9. 卸载边界
 

@@ -86,7 +86,7 @@ node tools/published-smoke.cjs /path/to/dotnet /path/to/artifacts/web
 
 ## 6. 本次执行记录
 
-执行日期：2026-10-18。以下为最终源码对应的实际验证结果。
+执行日期：2026-10-18。以下记录应用功能基线的实际验证结果；后续 NAT/EIP 修复只涉及部署脚本、测试与文档，不重复运行未改动的 .NET 应用测试，增量结果另列于第 7 节。
 
 已执行：
 
@@ -105,3 +105,20 @@ node tools/published-smoke.cjs /path/to/dotnet /path/to/artifacts/web
 - Docker：依约排除，未执行。
 
 上述通过项已完成；真实 PostgreSQL 18 两项仍待在访问受限的专用实例执行。首次安装无旧健康部署可恢复；镜像回滚不自动回退数据库迁移。实际 Linux 所有权/systemd/网络/断电持久性未由 stub 测试证明，详见部署文档。公网明文 HTTP 仍不是安全生产部署。
+
+## 7. NAT/EIP 部署增量验证
+
+执行日期：2026-10-18。公网身份 `PUBLIC_IPV4` 与本机监听 `BIND_IPV4` 分离，保留原安装命令；不要求将云 EIP 添加到本机接口。
+
+- `transactions.test.mjs`：**29 项通过、0 失败/跳过**。保留原 22 项；新增首次环境写入私网绑定、旧配置不继承进程绑定、保存绑定重跑、显式覆盖、覆盖失败和强杀恢复，以及应用回滚/恢复保留 NAT 绑定。该 runner 注入绑定候选、跳过网络预检，不冒充网络集成验收。新增回滚重试用例最初因固定测试时钟重用事务目录失败，允许 fixture 时钟前进后通过，未修改生产事务规则掩盖失败。
+- `networking.test.mjs`：**91 项通过、0 失败/跳过**。使用 fail-closed 的 `ip`、`ss`、`curl` 和只读 Docker 查询 mock，覆盖直绑/NAT、绑定优先级、地址/路由歧义拒绝、端口与协议冲突、旧配置回载隔离，以及数字 IP/域名 URL 保留公网身份并通过 `--connect-to` 连接私网绑定。
+- 从实际脚本提取恢复白名单/绑定预检及 HSTS 探测函数执行隔离测试，不执行脚本入口。覆盖新旧归档绑定、继承变量隔离、失效绑定拒绝、HSTS/TLS 错误和临时文件清理；静态固定配置恢复及仅数据库恢复的绑定预检位于安全备份、停服务和数据库覆盖之前。Compose 绑定与全部健康探测调用点仅做静态接线检查。
+- 所有 deploy shell、两份 fixture stub 的 `bash -n`，两份测试 runner 的 `node --check` 及 `git diff --check` 通过。非法 CR/LF 测试参数通过 NUL 分帧文件传递，避免 Windows argv 归一化影响断言。
+
+整套部署隔离测试联合执行：**120 项通过、0 失败、0 跳过**（约 104 秒）。复现命令：
+
+```bash
+node --test tests/Deployment/*.test.mjs
+```
+
+本轮未运行真实 Docker（包括 Compose config）、systemd、数据库恢复/归档完整编排、实际网络/TLS 或用户服务器操作；未验证云 EIP 映射、安全组或公网可达性。未改动及重跑 .NET 应用代码和测试，沿用第 6 节应用基线；真实 PostgreSQL 两项仍未执行。所有网络数据和秘密均为临时 fixture 的合成值，不读取生产秘密。

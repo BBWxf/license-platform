@@ -25,7 +25,7 @@ ASP.NET Core 10 许可证平台及其 Ubuntu/Debian 单机容器部署运维文�
 
 ## 快速安装
 
-主机需为 Ubuntu/Debian、systemd、Docker Engine、Compose v2，建议至少 2 核 2 GiB 和 10 GiB 可用磁盘。固定公网 IPv4 必须实际配置在本机接口上。
+主机需为 Ubuntu/Debian、systemd、Docker Engine、Compose v2，建议至少 2 核 2 GiB 和 10 GiB 可用磁盘。支持公网 IP 直接上网卡，也支持云服务器 NAT/EIP：公网地址用于访问，本机具体 IPv4 用于监听；常见单出口主机会自动识别，无需把公网 EIP 添加到网卡。
 
 从源码构建：
 
@@ -35,6 +35,8 @@ sudo ./deploy/install.sh \
   --public-ip "$PUBLIC_IPV4" \
   --accept-insecure-http
 ```
+
+多出口或路由无法唯一识别时，追加 `--bind-ip <本机IPv4>`。该地址必须实际属于本机，不能是 `0.0.0.0`；已有部署默认保留已保存绑定，失效时停止而不自动切换接口。本机健康检查不证明云平台 EIP 映射、安全组或公网可达性，仍需从外部客户端核验。
 
 使用预构建且固定 digest 的应用镜像：
 

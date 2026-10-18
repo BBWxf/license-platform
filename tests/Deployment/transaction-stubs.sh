@@ -48,7 +48,7 @@ readlink() {
   else command readlink "$@"; fi
 }
 date() {
-  if [[ "${1:-}" == '--utc' ]]; then printf '%s\n' '20261018T120000.123456789Z';
+  if [[ "${1:-}" == '--utc' ]]; then printf '%s\n' "${FIXTURE_TIMESTAMP:-20261018T120000.123456789Z}";
   else printf '%s\n' '2026-10-18T12:00:00Z'; fi
 }
 fixture_log() { printf '%s\n' "$*" >>"${FIXTURE_ROOT}/actions"; }

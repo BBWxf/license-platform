@@ -12,6 +12,9 @@ source "${SCRIPT_DIR}/lib/common.sh"
 
 MODE=""
 PUBLIC_IPV4=""
+BIND_IPV4_CLI=""
+BIND_IPV4_VALUE=""
+SAVED_BIND_IPV4=""
 ACCEPT_INSECURE_HTTP=0
 APP_IMAGE_CLI=""
 BUILD_LOCAL=1
@@ -36,11 +39,13 @@ usage() {
     --mode http-ip \
     --public-ip <服务器固定公网IPv4> \
     --accept-insecure-http \
+    [--bind-ip <本机监听IPv4>] \
     [--app-image <仓库/镜像:明确版本|仓库/镜像@sha256:digest>]
 
 说明:
   不传 --app-image 时，从当前源码构建 license-platform:0.1.0-local。
   传入 --app-image 时，拉取预构建镜像；禁止隐式标签和 latest。
+  云 NAT/EIP 自动选择唯一默认出口的本机 IPv4；多出口时用 --bind-ip 明确指定。
   当前仅支持 http-ip。必须显式接受明文 HTTP 风险。
 USAGE
 }
@@ -55,6 +60,11 @@ while (($# > 0)); do
     --public-ip)
       (($# >= 2)) || fatal "--public-ip 缺少值"
       PUBLIC_IPV4="$2"
+      shift 2
+      ;;
+    --bind-ip)
+      (($# >= 2)) || fatal "--bind-ip 缺少值"
+      BIND_IPV4_CLI="$2"
       shift 2
       ;;
     --accept-insecure-http)
@@ -96,7 +106,7 @@ WARNING
 validate_public_ipv4() {
   local value="$1"
   local a b c d octet
-  [[ "${value}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || fatal "不是有效 IPv4: ${value}"
+  is_usable_bind_ipv4 "${value}" || fatal "不是有效 IPv4: ${value}"
   IFS='.' read -r a b c d <<<"${value}"
   for octet in "${a}" "${b}" "${c}" "${d}"; do
     ((10#${octet} >= 0 && 10#${octet} <= 255)) || fatal "不是有效 IPv4: ${value}"
@@ -167,45 +177,18 @@ check_systemd() {
   log "systemd 检查通过。"
 }
 
-check_public_ip_is_local() {
-  require_command ip
-  if ! ip -o -4 address show | grep -Fq " ${PUBLIC_IPV4}/"; then
-    fatal "公网 IPv4 ${PUBLIC_IPV4} 未配置在本机接口上；为避免绑定到错误接口，安装已停止。NAT 场景请先把固定地址正确映射/配置到主机。"
-  fi
+select_install_bind_ipv4() {
+  BIND_IPV4_VALUE="$(select_bind_ipv4 "${PUBLIC_IPV4}" "${BIND_IPV4_CLI}" "${SAVED_BIND_IPV4}")"
+  log "访问地址: ${PUBLIC_IPV4}；本机监听地址: ${BIND_IPV4_VALUE}。"
 }
 
-check_port_80() {
-  local container_id project service binding host_binding own_binding=0
-  while IFS= read -r container_id; do
-    [[ -n "${container_id}" ]] || continue
-    project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "${container_id}" 2>/dev/null || true)"
-    service="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "${container_id}" 2>/dev/null || true)"
-    while IFS= read -r binding; do
-      [[ -n "${binding}" ]] || continue
-      host_binding="${binding##* -> }"
-      case "${host_binding}" in
-        "${PUBLIC_IPV4}:80"|"0.0.0.0:80"|"[::]:80")
-          if [[ "${project}" == "license-platform" && "${service}" == "caddy" ]]; then
-            own_binding=1
-          else
-            fatal "目标地址的 TCP 80 已由现有容器 ${container_id} 使用；安装不会停止或修改该容器。"
-          fi
-          ;;
-      esac
-    done < <(docker port "${container_id}" 2>/dev/null || true)
-  done < <(docker ps --filter publish=80 --format '{{.ID}}')
-
-  require_command ss
-  if (( own_binding == 0 )); then
-    while IFS=' ' read -r _state _recv_q _send_q local_address _peer; do
-      case "${local_address}" in
-        "${PUBLIC_IPV4}:80"|"0.0.0.0:80"|"*:80"|"[::]:80")
-          fatal "目标地址的主机 TCP 80 已被占用；安装不会停止或修改现有进程/容器。"
-          ;;
-      esac
-    done < <(ss -H -ltn 'sport = :80')
+check_install_ports() {
+  check_bind_port_available "${BIND_IPV4_VALUE}" 80 tcp
+  if [[ "${HTTPS_ENABLED_VALUE}" == true ]]; then
+    check_bind_port_available "${BIND_IPV4_VALUE}" 443 tcp
+    check_bind_port_available "${BIND_IPV4_VALUE}" 443 udp
   fi
-  log "端口 80 检查通过。"
+  log "所需本机监听端口检查通过。"
 }
 
 generate_base64_secret() {
@@ -656,8 +639,6 @@ if [[ -e "${INSTALL_PENDING_FILE}" || -L "${INSTALL_PENDING_FILE}" ]]; then
   fatal "安装重跑恢复失败；事务标记保留，不能假定部署健康。"
 fi
 check_install_managed_paths
-check_public_ip_is_local
-check_port_80
 
 APP_IMAGE="${DEFAULT_APP_IMAGE}"
 APP_SOURCE_MODE="local"
@@ -675,9 +656,10 @@ if [[ -e "${DEFAULT_CONFIG_DIR}/deployment.env" || -L "${DEFAULT_CONFIG_DIR}/dep
   # Preserve the selected image and source mode without allowing the old file to
   # overwrite this invocation's validated PUBLIC_IPV4 or other shell variables.
   mapfile -t existing_selection < <(
+    unset BIND_IPV4 PUBLIC_IPV4
     # shellcheck disable=SC1091
     source "${DEFAULT_CONFIG_DIR}/deployment.env"
-    printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
       "${APP_IMAGE:-${DEFAULT_APP_IMAGE}}" \
       "${APP_SOURCE_MODE:-local}" \
       "${HTTPS_ENABLED:-false}" \
@@ -688,8 +670,12 @@ if [[ -e "${DEFAULT_CONFIG_DIR}/deployment.env" || -L "${DEFAULT_CONFIG_DIR}/dep
       "${CADDY_IMAGE:-${DEFAULT_CADDY_IMAGE}}" \
       "${DOTNET_SDK_IMAGE:-${DEFAULT_DOTNET_SDK_IMAGE}}" \
       "${DOTNET_ASPNET_IMAGE:-${DEFAULT_DOTNET_ASPNET_IMAGE}}" \
-      "${SECRETS_GID:-${DEFAULT_SECRETS_GID}}"
+      "${SECRETS_GID:-${DEFAULT_SECRETS_GID}}" \
+      "${BIND_IPV4:-${PUBLIC_IPV4}}"
   )
+  ((${#existing_selection[@]} == 12)) || fatal "无法完整读取已有部署配置。"
+  SAVED_BIND_IPV4="${existing_selection[11]}"
+  [[ -n "${SAVED_BIND_IPV4}" ]] || fatal "已有部署缺少本机监听地址与兼容公网地址。"
   APP_IMAGE="${existing_selection[0]:-${DEFAULT_APP_IMAGE}}"
   APP_SOURCE_MODE="${existing_selection[1]:-local}"
   HTTPS_ENABLED_VALUE="${existing_selection[2]:-false}"
@@ -728,6 +714,8 @@ else
   ALLOW_INSECURE_HTTP_VALUE="true"
   HSTS_ENABLED_VALUE="false"
 fi
+select_install_bind_ipv4
+check_install_ports
 validate_pinned_image "${APP_IMAGE}" "应用镜像"
 validate_pinned_image "${POSTGRES_IMAGE_VALUE}" "PostgreSQL 镜像"
 validate_pinned_image "${CADDY_IMAGE_VALUE}" "Caddy 镜像"
@@ -806,6 +794,7 @@ DATA_DIR=${DEFAULT_DATA_DIR}
 BACKUP_DIR=${DEFAULT_BACKUP_DIR}
 SOURCE_DIR=${DEFAULT_INSTALL_DIR}/source
 PUBLIC_IPV4=${PUBLIC_IPV4}
+BIND_IPV4=${BIND_IPV4_VALUE}
 CADDY_SITE_ADDRESS=${CADDY_SITE_ADDRESS_VALUE}
 HTTPS_ENABLED=${HTTPS_ENABLED_VALUE}
 ALLOW_INSECURE_HTTP=${ALLOW_INSECURE_HTTP_VALUE}
@@ -836,6 +825,7 @@ if (( INSTALL_TRANSACTION_ACTIVE == 1 )); then
     INSTALL_DIR "${DEFAULT_INSTALL_DIR}" CONFIG_DIR "${DEFAULT_CONFIG_DIR}" \
     DATA_DIR "${DEFAULT_DATA_DIR}" BACKUP_DIR "${DEFAULT_BACKUP_DIR}" \
     SOURCE_DIR "${DEFAULT_INSTALL_DIR}/source" PUBLIC_IPV4 "${PUBLIC_IPV4}" \
+    BIND_IPV4 "${BIND_IPV4_VALUE}" \
     CADDY_SITE_ADDRESS "${CADDY_SITE_ADDRESS_VALUE}" HTTPS_ENABLED "${HTTPS_ENABLED_VALUE}" \
     ALLOW_INSECURE_HTTP "${ALLOW_INSECURE_HTTP_VALUE}" HSTS_ENABLED "${HSTS_ENABLED_VALUE}" \
     SECRETS_GID "${SECRETS_GID_VALUE}" APP_IMAGE "${APP_IMAGE}" APP_SOURCE_MODE "${APP_SOURCE_MODE}" \
@@ -900,6 +890,9 @@ INSTALL_COMPLETED=1
 sync -f "${DEFAULT_DATA_DIR}"
 trap - EXIT INT TERM
 log "安装完成。每日备份 timer 已创建并启用。"
+if [[ "${BIND_IPV4}" != "${PUBLIC_IPV4}" ]]; then
+  warn "本机已监听 ${BIND_IPV4}，对外地址为 ${PUBLIC_IPV4}；请确认云平台 NAT/EIP 映射和安全组，并从外部客户端验证访问。"
+fi
 log "初始后台密码仅保存在 ${DEFAULT_CONFIG_DIR}/secrets/admin_initial_password（父目录 root-only，文件 root:${SECRETS_GID_VALUE} 0440，仅供容器补充组只读挂载）。首次登录后请立即轮换。"
 if [[ "${HTTPS_ENABLED_VALUE}" == "false" ]]; then
   warn "当前仍是公网明文 HTTP，不安全。访问地址: http://${PUBLIC_IPV4}"

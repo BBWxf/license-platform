@@ -148,7 +148,7 @@ USAGE
     compose up --detach --force-recreate app caddy
     wait_for_service app 180
     wait_for_service caddy 180
-    probe_public_health http "${PUBLIC_IPV4}" "${PUBLIC_IPV4}" 15 || \
+    probe_public_health http "${PUBLIC_IPV4}" "${BIND_IPV4}" 15 || \
       fatal "中断的 HTTPS 切换未能恢复到已验证的 HTTP 健康状态。"
     printf 'STATUS=ROLLED_BACK_AFTER_INTERRUPTION\n' >"${interrupted_state_dir}/state.env"
     chown root:root "${interrupted_state_dir}/state.env"
@@ -230,34 +230,8 @@ USAGE
     exit 0
   fi
 
-  check_https_port_free() {
-    local container_id binding host_binding
-    while IFS= read -r container_id; do
-      [[ -n "${container_id}" ]] || continue
-      while IFS= read -r binding; do
-        [[ -n "${binding}" ]] || continue
-        host_binding="${binding##* -> }"
-        case "${host_binding}" in
-          "${PUBLIC_IPV4}:443"|"0.0.0.0:443"|"[::]:443")
-            fatal "TCP/UDP 443 已由容器 ${container_id} 使用。"
-            ;;
-        esac
-      done < <(docker port "${container_id}" 2>/dev/null || true)
-    done < <(docker ps --filter publish=443 --format '{{.ID}}')
-
-    local _state _recv _send local_address _peer
-    while IFS=' ' read -r _state _recv _send local_address _peer; do
-      case "${local_address}" in
-        "${PUBLIC_IPV4}:443"|"0.0.0.0:443"|"*:443"|"[::]:443") fatal "主机 TCP 443 已被占用。" ;;
-      esac
-    done < <(ss -H -ltn 'sport = :443')
-    while IFS=' ' read -r _state _recv _send local_address _peer; do
-      case "${local_address}" in
-        "${PUBLIC_IPV4}:443"|"0.0.0.0:443"|"*:443"|"[::]:443") fatal "主机 UDP 443 已被占用。" ;;
-      esac
-    done < <(ss -H -lun 'sport = :443')
-  }
-  check_https_port_free
+  check_bind_port_available "${BIND_IPV4}" 443 tcp
+  check_bind_port_available "${BIND_IPV4}" 443 udp
 
   [[ -f "${LP_HOME}/Caddyfile.https" && ! -L "${LP_HOME}/Caddyfile.https" ]] || fatal "缺少受管 HTTPS Caddy 模板。"
   [[ -f "${LP_HOME}/compose.https.yml" && ! -L "${LP_HOME}/compose.https.yml" ]] || fatal "缺少 HTTPS Compose override。"
@@ -271,8 +245,8 @@ USAGE
     "${CADDY_IMAGE}" validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
   log "确认当前 HTTP 回滚基线健康。"
-  probe_public_health http "${PUBLIC_IPV4}" "${PUBLIC_IPV4}" 15 || \
-    fatal "当前 HTTP 公网入口不健康，拒绝开始 HTTPS 切换。"
+  probe_public_health http "${PUBLIC_IPV4}" "${BIND_IPV4}" 15 || \
+    fatal "当前 HTTP 本机入口不健康，拒绝开始 HTTPS 切换。"
 
   log "切换 HTTPS 前创建数据库、配置和密钥备份。"
   LICENSE_PLATFORM_OPERATION_LOCK_HELD=1 "${LP_HOME}/bin/backup.sh" >/dev/null
@@ -298,7 +272,7 @@ USAGE
     compose up --detach --force-recreate app caddy
     wait_for_service app 180
     wait_for_service caddy 180
-    probe_public_health http "${PUBLIC_IPV4}" "${PUBLIC_IPV4}" 15
+    probe_public_health http "${PUBLIC_IPV4}" "${BIND_IPV4}" 15
   )
   rollback_https_switch() {
     local rc=$?
@@ -311,7 +285,7 @@ USAGE
         chown root:root "${state_dir}/state.env"
         chmod 0600 "${state_dir}/state.env"
         rm -f -- "${transaction_file}"
-        warn "原 HTTP 配置已恢复，并通过固定公网 IPv4 的严格健康检查。"
+        warn "原 HTTP 配置已恢复，并通过保留公网 Host 的本机入口严格健康检查。"
       else
         printf 'STATUS=ROLLBACK_FAILED\n' >"${state_dir}/state.env" 2>/dev/null || true
         chown root:root "${state_dir}/state.env" 2>/dev/null || true
@@ -361,8 +335,8 @@ STATE
   wait_for_service caddy 180
 
   local deadline=$((SECONDS + 300))
-  until probe_public_health https "${target}" "${PUBLIC_IPV4}" 15; do
-    ((SECONDS < deadline)) || fatal "HTTPS 证书或公网健康检查在 300 秒内未就绪。"
+  until probe_public_health https "${target}" "${BIND_IPV4}" 15; do
+    ((SECONDS < deadline)) || fatal "HTTPS 证书或本机入口健康检查在 300 秒内未就绪。"
     sleep 5
   done
   "${LP_HOME}/bin/health-check.sh"
@@ -380,7 +354,7 @@ STATE
   log "HTTPS 已启用: ${site_address}"
   log "HSTS 仍保持禁用；完成证书续期与回滚演练后再显式启用。"
   if [[ "${target_kind}" == "ipv4" ]]; then
-    log "已通过公网 IPv4 证书完成验证；该证书通常为短期证书，请持续监控自动续期。"
+    log "本机入口已通过公网 IPv4 证书校验；公网映射与安全组须另行验证。该证书通常为短期证书，请持续监控自动续期。"
   fi
   log "切换前配置保留在 ${state_dir}。"
 )
@@ -438,7 +412,7 @@ USAGE
         --connect-timeout 15 --max-time 15 --request GET \
         --output "${body_file}" --dump-header "${header_file}" \
         --write-out '%{http_code}' --proto '=https' \
-        --resolve "${host}:443:${PUBLIC_IPV4}" \
+        --connect-to "${host}:443:${BIND_IPV4}:443" \
         "https://${host}/health")"; then
       rm -f -- "${body_file}" "${header_file}"
       return 1
@@ -486,14 +460,14 @@ USAGE
 
   if [[ "${HSTS_ENABLED:-false}" == "true" ]]; then
     "${LP_HOME}/bin/health-check.sh"
-    probe_hsts present || fatal "配置声明已启用 HSTS，但公网 HTTPS 响应未返回预期的 30 天策略。"
-    log "HSTS 已启用并通过公网响应头验证。"
+    probe_hsts present || fatal "配置声明已启用 HSTS，但本机入口 HTTPS 响应未返回预期的 30 天策略。"
+    log "HSTS 已启用并通过本机入口响应头验证；公网可达性须另行核验。"
     exit 0
   fi
 
-  log "确认 HTTPS 公网基线健康；不会忽略证书或跟随重定向。"
+  log "确认 HTTPS 本机入口基线健康；保留公网 TLS 身份，不会忽略证书或跟随重定向。"
   "${LP_HOME}/bin/health-check.sh"
-  probe_public_health https "${host}" "${PUBLIC_IPV4}" 15 || fatal "HTTPS 公网基线不健康，拒绝启用 HSTS。"
+  probe_public_health https "${host}" "${BIND_IPV4}" 15 || fatal "HTTPS 本机入口基线不健康，拒绝启用 HSTS。"
 
   log "启用 HSTS 前创建数据库、配置和密钥备份。"
   LICENSE_PLATFORM_OPERATION_LOCK_HELD=1 "${LP_HOME}/bin/backup.sh" >/dev/null
@@ -560,7 +534,7 @@ STATE
   wait_for_service app 180
   wait_for_service caddy 120
   "${LP_HOME}/bin/health-check.sh"
-  probe_hsts present || fatal "公网 HTTPS 响应未返回精确的 30 天 HSTS，或意外包含 includeSubDomains。"
+  probe_hsts present || fatal "本机入口 HTTPS 响应未返回精确的 30 天 HSTS，或意外包含 includeSubDomains。"
 
   write_env_value "${state_dir}/state.env" STATUS SUCCEEDED
   rm -f -- "${transaction_file}"

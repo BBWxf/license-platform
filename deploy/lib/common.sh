@@ -55,13 +55,145 @@ install_runtime_secret() {
   install -o root -g "${secrets_gid}" -m 0440 "${source}" "${target}"
 }
 
+is_usable_bind_ipv4() {
+  local value="$1" a b c d octet
+  [[ "${value}" != *[[:space:]]* ]] || return 1
+  [[ "${value}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  IFS='.' read -r a b c d <<<"${value}"
+  for octet in "${a}" "${b}" "${c}" "${d}"; do
+    [[ "${octet}" == 0 || "${octet}" =~ ^[1-9][0-9]{0,2}$ ]] || return 1
+    ((10#${octet} <= 255)) || return 1
+  done
+  ((10#${a} >= 1 && 10#${a} <= 223 && 10#${a} != 127)) || return 1
+  ! ((10#${a} == 169 && 10#${b} == 254))
+}
+
+is_local_ipv4() {
+  local address="$1" interface="${2:-}" addresses
+  local -a arguments=(-o -4 address show)
+  is_usable_bind_ipv4 "${address}" || return 1
+  [[ -z "${interface}" ]] || arguments+=(dev "${interface}")
+  addresses="$(ip "${arguments[@]}")" || return 1
+  [[ " ${addresses}" == *" inet ${address}/"* ]]
+}
+
+require_local_bind_ipv4() {
+  is_usable_bind_ipv4 "$1" || fatal "本机监听地址必须是有效的具体单播 IPv4，不能使用通配、回环或链路本地地址。"
+  require_command ip
+  is_local_ipv4 "$1" || fatal "本机监听 IPv4 $1 未配置在本机接口上；请用 --bind-ip 指定实际本机地址。"
+}
+
+select_bind_ipv4() {
+  local public="$1" explicit="${2:-}" saved="${3:-}" selected routes route lookup word
+  local default_device="" device="" source="" default_device_count=0 device_count=0 source_count=0 index
+  local -a lines=() words=()
+  require_command ip
+  if [[ -n "${explicit}" || -n "${saved}" ]]; then
+    selected="${explicit:-${saved}}"
+    require_local_bind_ipv4 "${selected}"
+    printf '%s\n' "${selected}"
+    return 0
+  fi
+  if is_local_ipv4 "${public}"; then
+    printf '%s\n' "${public}"
+    return 0
+  fi
+
+  routes="$(ip -o -4 route show default)" || fatal "无法读取默认路由；请用 --bind-ip 指定本机监听 IPv4。"
+  while IFS= read -r route; do
+    [[ -z "${route}" ]] || lines+=("${route}")
+  done <<<"${routes}"
+  ((${#lines[@]} == 1)) || fatal "没有唯一默认路由；请用 --bind-ip 指定本机监听 IPv4。"
+  IFS=' ' read -r -a words <<<"${lines[0]}"
+  for ((index = 0; index < ${#words[@]}; index++)); do
+    word="${words[index]}"
+    [[ "${word}" != nexthop ]] || fatal "检测到多路径默认路由；请用 --bind-ip 指定本机监听 IPv4。"
+    if [[ "${word}" == dev ]]; then
+      default_device="${words[index+1]:-}"
+      ((default_device_count += 1))
+    fi
+  done
+  ((default_device_count == 1)) && [[ -n "${default_device}" ]] || fatal "默认路由出口不明确；请用 --bind-ip 指定本机监听 IPv4。"
+
+  lookup="$(ip -o -4 route get "${public}")" || fatal "无法确定公网地址的本机路由源；请用 --bind-ip 指定本机监听 IPv4。"
+  lines=()
+  while IFS= read -r route; do
+    [[ -z "${route}" ]] || lines+=("${route}")
+  done <<<"${lookup}"
+  ((${#lines[@]} == 1)) || fatal "本机路由源存在歧义；请用 --bind-ip 指定本机监听 IPv4。"
+  IFS=' ' read -r -a words <<<"${lines[0]}"
+  for ((index = 0; index < ${#words[@]}; index++)); do
+    case "${words[index]}" in
+      dev) device="${words[index+1]:-}"; ((device_count += 1)) ;;
+      src) source="${words[index+1]:-}"; ((source_count += 1)) ;;
+      nexthop) fatal "本机路由源存在多路径；请用 --bind-ip 指定本机监听 IPv4。" ;;
+    esac
+  done
+  ((device_count == 1 && source_count == 1)) && [[ "${device}" == "${default_device}" ]] || \
+    fatal "无法唯一确定默认出口的本机 IPv4；请用 --bind-ip 指定。"
+  is_local_ipv4 "${source}" "${device}" || fatal "默认路由源不是可用的本机单播 IPv4；请用 --bind-ip 指定。"
+  warn "检测到 NAT/EIP：公网访问地址 ${public}，本机监听地址 ${source}。请另行核对云平台映射与安全组；本机健康不证明公网可达。"
+  printf '%s\n' "${source}"
+}
+
+check_bind_port_available() {
+  local address="$1" port="$2" protocol="$3" container_ids container_id project service bindings binding host_binding
+  local listeners _state _recv _send local_address _peer own_binding=0
+  require_local_bind_ipv4 "${address}"
+  [[ "${port}" =~ ^[1-9][0-9]{0,4}$ ]] && ((port <= 65535)) || fatal "端口检查参数无效。"
+  [[ "${protocol}" == tcp || "${protocol}" == udp ]] || fatal "端口检查协议无效。"
+  require_command docker
+  require_command ss
+  container_ids="$(docker ps --filter "publish=${port}" --format '{{.ID}}')" || fatal "无法检查容器端口占用。"
+  while IFS= read -r container_id; do
+    [[ -n "${container_id}" ]] || continue
+    project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "${container_id}" 2>/dev/null || true)"
+    service="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "${container_id}" 2>/dev/null || true)"
+    bindings="$(docker port "${container_id}")" || fatal "无法检查容器 ${container_id} 的端口映射。"
+    while IFS= read -r binding; do
+      [[ "${binding%% -> *}" == *"/${protocol}" ]] || continue
+      host_binding="${binding##* -> }"
+      case "${host_binding}" in
+        "${address}:${port}"|"0.0.0.0:${port}"|"[::]:${port}")
+          if [[ "${project}" == "${LP_PROJECT_NAME}" && "${service}" == caddy ]]; then
+            own_binding=1
+          else
+            fatal "目标地址的 ${protocol^^} ${port} 已由容器 ${container_id} 使用；不会停止或修改该容器。"
+          fi
+          ;;
+      esac
+    done <<<"${bindings}"
+  done <<<"${container_ids}"
+
+  if ((own_binding == 0)); then
+    if [[ "${protocol}" == tcp ]]; then
+      listeners="$(ss -H -ltn "sport = :${port}")" || fatal "无法检查主机 TCP 端口。"
+    else
+      listeners="$(ss -H -lun "sport = :${port}")" || fatal "无法检查主机 UDP 端口。"
+    fi
+    while IFS=' ' read -r _state _recv _send local_address _peer; do
+      case "${local_address}" in
+        "${address}:${port}"|"0.0.0.0:${port}"|"*:${port}"|"[::]:${port}")
+          fatal "目标地址的主机 ${protocol^^} ${port} 已被占用；不会停止或修改现有进程。"
+          ;;
+      esac
+    done <<<"${listeners}"
+  fi
+}
+
 load_deployment_env() {
   verify_root_0600_file "${LP_ENV_FILE}"
   # The file is generated by install.sh, owned by root, and contains shell-safe values.
+  # A legacy snapshot must not inherit a newer binding from this process.
+  unset BIND_IPV4 PUBLIC_IPV4
   set -a
   # shellcheck disable=SC1090
   source "${LP_ENV_FILE}"
   set +a
+  is_usable_bind_ipv4 "${PUBLIC_IPV4:-}" || fatal "deployment.env 中 PUBLIC_IPV4 无效或缺失。"
+  BIND_IPV4="${BIND_IPV4:-${PUBLIC_IPV4:-}}"
+  is_usable_bind_ipv4 "${BIND_IPV4}" || fatal "deployment.env 中 BIND_IPV4 或旧版 PUBLIC_IPV4 不是可用的本机监听地址。"
+  export BIND_IPV4
 
   LP_HOME="${INSTALL_DIR:-${LP_HOME}}"
   LP_CONFIG_DIR="${CONFIG_DIR:-${LP_CONFIG_DIR}}"
@@ -171,7 +303,7 @@ probe_public_health() {
   if ! status="$(curl --disable --noproxy '*' --silent --show-error \
       --connect-timeout "${timeout_seconds}" --max-time "${timeout_seconds}" \
       --request GET --output "${body_file}" --write-out '%{http_code}' \
-      --proto '=http,https' --resolve "${host}:${port}:${address}" \
+      --proto '=http,https' --connect-to "${host}:${port}:${address}:${port}" \
       "${scheme}://${host}/health")"; then
     rm -f -- "${body_file}"
     return 1

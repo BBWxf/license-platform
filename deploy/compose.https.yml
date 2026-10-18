@@ -3,5 +3,5 @@
 services:
   caddy:
     ports:
-      - "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}:443:443/tcp"
-      - "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}:443:443/udp"
+      - "${BIND_IPV4:-${PUBLIC_IPV4:?PUBLIC_IPV4 is required}}:443:443/tcp"
+      - "${BIND_IPV4:-${PUBLIC_IPV4:?PUBLIC_IPV4 is required}}:443:443/udp"

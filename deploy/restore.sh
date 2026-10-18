@@ -138,7 +138,7 @@ validate_restored_env() {
     [[ ! ${seen_keys["${key}"]+_} ]] || fatal "恢复的 deployment.env 含重复键: ${key}"
     seen_keys["${key}"]=1
     case "${key}" in
-      INSTALL_DIR|CONFIG_DIR|DATA_DIR|BACKUP_DIR|SOURCE_DIR|PUBLIC_IPV4|CADDY_SITE_ADDRESS|HTTPS_ENABLED|ALLOW_INSECURE_HTTP|HSTS_ENABLED|SECRETS_GID|APP_IMAGE|APP_SOURCE_MODE|POSTGRES_IMAGE|CADDY_IMAGE|DOTNET_SDK_IMAGE|DOTNET_ASPNET_IMAGE|POSTGRES_DB|POSTGRES_USER|BACKUP_RETENTION_DAYS|MIGRATION_TIMEOUT_SECONDS|APP_MEMORY_LIMIT|APP_CPU_LIMIT|DB_MEMORY_LIMIT|DB_CPU_LIMIT|CADDY_MEMORY_LIMIT|CADDY_CPU_LIMIT) ;;
+      INSTALL_DIR|CONFIG_DIR|DATA_DIR|BACKUP_DIR|SOURCE_DIR|PUBLIC_IPV4|BIND_IPV4|CADDY_SITE_ADDRESS|HTTPS_ENABLED|ALLOW_INSECURE_HTTP|HSTS_ENABLED|SECRETS_GID|APP_IMAGE|APP_SOURCE_MODE|POSTGRES_IMAGE|CADDY_IMAGE|DOTNET_SDK_IMAGE|DOTNET_ASPNET_IMAGE|POSTGRES_DB|POSTGRES_USER|BACKUP_RETENTION_DAYS|MIGRATION_TIMEOUT_SECONDS|APP_MEMORY_LIMIT|APP_CPU_LIMIT|DB_MEMORY_LIMIT|DB_CPU_LIMIT|CADDY_MEMORY_LIMIT|CADDY_CPU_LIMIT) ;;
       *) fatal "恢复的 deployment.env 含未知键: ${key}" ;;
     esac
     [[ -n "${value}" ]] || fatal "恢复的 deployment.env 含空值: ${key}"
@@ -149,6 +149,18 @@ restored_env_value() {
   local key="$1" line
   line="$(grep -E "^${key}=" "${RESTORED_CONFIG}/deployment.env" || true)"
   printf '%s\n' "${line#*=}"
+}
+
+prepare_restored_bind_ipv4() {
+  RESTORED_PUBLIC_IPV4="$(restored_env_value PUBLIC_IPV4)"
+  is_usable_bind_ipv4 "${RESTORED_PUBLIC_IPV4}" || fatal "备份 PUBLIC_IPV4 无效。"
+  RESTORED_BIND_IPV4="$(restored_env_value BIND_IPV4)"
+  if [[ -z "${RESTORED_BIND_IPV4}" ]]; then
+    RESTORED_BIND_IPV4="${RESTORED_PUBLIC_IPV4}"
+    write_env_value "${RESTORED_CONFIG}/deployment.env" BIND_IPV4 "${RESTORED_BIND_IPV4}"
+    log "旧版配置备份未包含 BIND_IPV4；预检阶段已保留原公网地址绑定。"
+  fi
+  require_local_bind_ipv4 "${RESTORED_BIND_IPV4}"
 }
 
 validate_base64_secret() {
@@ -208,7 +220,9 @@ if (( RESTORE_CONFIG == 1 )); then
     log "旧版配置备份未包含 HSTS_ENABLED；预检阶段已安全迁移为 false。"
   fi
 
-  for required_key in INSTALL_DIR CONFIG_DIR DATA_DIR BACKUP_DIR SOURCE_DIR PUBLIC_IPV4 CADDY_SITE_ADDRESS HTTPS_ENABLED ALLOW_INSECURE_HTTP HSTS_ENABLED SECRETS_GID APP_IMAGE APP_SOURCE_MODE POSTGRES_IMAGE CADDY_IMAGE DOTNET_SDK_IMAGE DOTNET_ASPNET_IMAGE POSTGRES_DB POSTGRES_USER; do
+  prepare_restored_bind_ipv4
+
+  for required_key in INSTALL_DIR CONFIG_DIR DATA_DIR BACKUP_DIR SOURCE_DIR PUBLIC_IPV4 BIND_IPV4 CADDY_SITE_ADDRESS HTTPS_ENABLED ALLOW_INSECURE_HTTP HSTS_ENABLED SECRETS_GID APP_IMAGE APP_SOURCE_MODE POSTGRES_IMAGE CADDY_IMAGE DOTNET_SDK_IMAGE DOTNET_ASPNET_IMAGE POSTGRES_DB POSTGRES_USER; do
     [[ -n "$(restored_env_value "${required_key}")" ]] || fatal "恢复的 deployment.env 缺少必需键: ${required_key}"
   done
 
@@ -218,13 +232,6 @@ if (( RESTORE_CONFIG == 1 )); then
   [[ "$(restored_env_value BACKUP_DIR)" == "${LP_BACKUP_DIR}" ]] || fatal "备份 BACKUP_DIR 与当前部署不一致。"
   [[ "$(restored_env_value POSTGRES_DB)" == "${POSTGRES_DB}" ]] || fatal "备份 PostgreSQL 数据库名与当前部署不一致。"
   [[ "$(restored_env_value POSTGRES_USER)" == "${POSTGRES_USER}" ]] || fatal "备份 PostgreSQL 用户与当前部署不一致。"
-
-  RESTORED_PUBLIC_IPV4="$(restored_env_value PUBLIC_IPV4)"
-  IFS=. read -r ipv4_a ipv4_b ipv4_c ipv4_d extra <<<"${RESTORED_PUBLIC_IPV4}"
-  [[ -z "${extra:-}" && "${ipv4_a:-}" =~ ^[0-9]+$ && "${ipv4_b:-}" =~ ^[0-9]+$ && "${ipv4_c:-}" =~ ^[0-9]+$ && "${ipv4_d:-}" =~ ^[0-9]+$ ]] || fatal "备份 PUBLIC_IPV4 无效。"
-  for octet in "${ipv4_a}" "${ipv4_b}" "${ipv4_c}" "${ipv4_d}"; do
-    ((10#${octet} <= 255)) || fatal "备份 PUBLIC_IPV4 无效。"
-  done
 
   RESTORED_HTTPS_ENABLED="$(restored_env_value HTTPS_ENABLED)"
   RESTORED_ALLOW_INSECURE_HTTP="$(restored_env_value ALLOW_INSECURE_HTTP)"
@@ -286,6 +293,8 @@ if (( RESTORE_CONFIG == 1 )); then
     --entrypoint caddy "$(restored_env_value CADDY_IMAGE)" \
     validate --config /etc/caddy/Caddyfile --adapter caddyfile
   log "配置归档、Caddyfile、环境约束、镜像固定规则和秘密格式预检通过。"
+else
+  require_local_bind_ipv4 "${BIND_IPV4}"
 fi
 
 log "恢复前创建当前状态安全备份。"
