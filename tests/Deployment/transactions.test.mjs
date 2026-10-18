@@ -317,10 +317,29 @@ test('initial environment creation persists a private binding with the public id
   const f = new Fixture(t);
   fs.unlinkSync(f.envFile); // Exercise the first-write path, with no prior env or journal.
   f.ok(f.install({}, false, '10.42.0.10'));
+  assert.match(read(f.envFile), /^DOTNET_SDK_IMAGE=mcr\.microsoft\.com\/dotnet\/sdk:10\.0\.302-noble$/m);
+  assert.match(read(f.envFile), /^DOTNET_ASPNET_IMAGE=mcr\.microsoft\.com\/dotnet\/aspnet:10\.0\.10-noble$/m);
   assert.match(read(f.envFile), /^BIND_IPV4=10\.42\.0\.10$/m);
   assert.match(read(f.envFile), /^PUBLIC_IPV4=8\.8\.8\.8$/m);
   assert.match(read(f.envFile), /^CADDY_SITE_ADDRESS=http:\/\/8\.8\.8\.8$/m);
   assert(!f.pending('install.pending'));
+});
+
+test('archiving a failed initial-build env permits corrected defaults without rotating secrets', t => {
+  const f = new Fixture(t);
+  const failedEnv = f.env +
+    'DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0.108-bookworm-slim\n' +
+    'DOTNET_ASPNET_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0.8-bookworm-slim\n';
+  write(f.envFile, failedEnv);
+  fs.renameSync(f.envFile, f.envFile + '.failed-build');
+  f.ok(f.install({}, true, '10.42.0.10'));
+  assert.equal(read(f.envFile + '.failed-build'), failedEnv);
+  assert.match(read(f.envFile), /^DOTNET_SDK_IMAGE=mcr\.microsoft\.com\/dotnet\/sdk:10\.0\.302-noble$/m);
+  assert.match(read(f.envFile), /^DOTNET_ASPNET_IMAGE=mcr\.microsoft\.com\/dotnet\/aspnet:10\.0\.10-noble$/m);
+  assert.match(read(f.envFile), /^BIND_IPV4=10\.42\.0\.10$/m);
+  for (const secret of ['postgres_password', 'card_lookup_key', 'master_encryption_key', 'admin_initial_password']) {
+    assert.equal(read(path.join(f.config, 'secrets', secret)), 'fixture secret never printed\n');
+  }
 });
 
 test('installer migrates legacy binding using its saved public IP, not an inherited bind', t => {

@@ -86,7 +86,7 @@ node tools/published-smoke.cjs /path/to/dotnet /path/to/artifacts/web
 
 ## 6. 本次执行记录
 
-执行日期：2026-10-18。以下记录应用功能基线的实际验证结果；后续 NAT/EIP 修复只涉及部署脚本、测试与文档，不重复运行未改动的 .NET 应用测试，增量结果另列于第 7 节。
+执行日期：2026-10-18。以下记录应用功能基线的实际验证结果；后续 NAT/EIP 和镜像标签修复未改动 .NET 应用代码，不重复运行应用测试，增量结果另列于第 7、8 节。
 
 已执行：
 
@@ -122,3 +122,16 @@ node --test tests/Deployment/*.test.mjs
 ```
 
 本轮未运行真实 Docker（包括 Compose config）、systemd、数据库恢复/归档完整编排、实际网络/TLS 或用户服务器操作；未验证云 EIP 映射、安全组或公网可达性。未改动及重跑 .NET 应用代码和测试，沿用第 6 节应用基线；真实 PostgreSQL 两项仍未执行。所有网络数据和秘密均为临时 fixture 的合成值，不读取生产秘密。
+
+## 8. 基础镜像标签修复
+
+执行日期：2026-10-18。用户服务器已通过 NAT 预检，但在首次镜像构建阶段返回 `aspnet:10.0.8-bookworm-slim: not found`。修复 Dockerfile、安装器和文档的默认值为 `sdk:10.0.302-noble` / `aspnet:10.0.10-noble`。
+
+- 通过微软 MCR 的只读 HTTP manifest 接口核对：旧 SDK/ASP.NET Bookworm 标签均为 404；上述最终 Noble 标签均存在，并含 Linux amd64/arm/arm64 清单。只读取清单 JSON，不拉取镜像层、不调用 Docker。
+- 官方 [.NET 10 发布元数据](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json) 确认 SDK 10.0.302 对应 ASP.NET Runtime 10.0.10；`global.json` 允许同一主/次版本内的稳定 SDK feature band 更新。
+- 新增离线镜像选择一致性、SDK roll-forward 回归，并在临时文件 fixture 中验证：首次失败配置改名备份后，可生成修正的默认镜像选择，原四个 secret 均不变。该用例不代表实际主机恢复或镜像构建通过。
+- 失败首次安装留下的 `deployment.env` 不能直接当作健康重跑基线；本次仅指导在没有本项目容器、数据卷及 pending 事务、且未改动初始配置的情况下保留备份后重试，不删除密钥或数据卷，也不放宽已有部署的健康基线要求。
+
+最终源码的 `node --test tests/Deployment/*.test.mjs`：**123 项通过、0 失败、0 跳过**（镜像选择 2 项、网络 91 项、事务 30 项，约 100 秒）。安装器 shell 语法、变动测试 runner 的 Node 语法及 diff 空白检查通过。
+
+未执行容器拉取/构建/启动、Compose config、systemd 或 .NET 应用重跑；运行时镜像的补丁升级尚未经真实容器验收。此前 Windows .NET 10.0.8 应用基线保持独立，不冒充本次 Linux 运行时 10.0.10 的执行结果。

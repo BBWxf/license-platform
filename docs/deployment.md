@@ -49,9 +49,11 @@ Compose 项目名固定为 `license-platform`，服务名固定为：
 
 - PostgreSQL：`postgres:18.4-bookworm`；
 - Caddy：`caddy:2.10.2-alpine`；
-- .NET SDK：`mcr.microsoft.com/dotnet/sdk:10.0.108-bookworm-slim`；
-- ASP.NET Runtime：`mcr.microsoft.com/dotnet/aspnet:10.0.8-bookworm-slim`；
+- .NET SDK：`mcr.microsoft.com/dotnet/sdk:10.0.302-noble`；
+- ASP.NET Runtime：`mcr.microsoft.com/dotnet/aspnet:10.0.10-noble`；
 - 本地应用镜像：`license-platform:0.1.0-local`。
+
+这两个 .NET Noble 标签已通过微软 MCR manifest HTTP 接口确认存在并包含 Linux amd64/arm64；它们对应 .NET 10.0.10 发布的 SDK/运行时组合。`global.json` 的 `latestFeature` 允许 SDK 10.0.302。旧版默认的 `10.0.108-bookworm-slim` / `10.0.8-bookworm-slim` 标签不存在，不能继续使用；修改源码默认值不会自动覆盖已保存的镜像选择。此核对不等于容器构建或启动验收。
 
 **版本标签仍然可能被仓库端重指向。正式发布时必须把应用和基础镜像替换为经发布流程验证的 `@sha256:<64位digest>`，并记录 SBOM、签名或来源证明。** 当前项目无法推断最终应用镜像 digest，所以安装器允许明确版本变量，但拒绝隐式标签和 `latest`。
 
@@ -137,6 +139,8 @@ sudo ./deploy/install.sh \
 成功重跑保留现有资源限额、数据库名称、保留期及未知配置键，只更新安装器明确管理的路径、入口和镜像选择；已有秘密不轮换。文档用全新 staging 替换，不合并旧目录。旧源码、安全镜像及事务快照不会自动清理。
 
 边界：这不是数据库事务，已执行的迁移、数据卷内容和新创建的秘密不会自动撤销；恢复旧数据库镜像也不代表 schema/数据格式可降级。首次安装没有健康旧部署可回退，失败后可能留下本项目服务、秘密和受管文件；首次安装的半成品若没有事务标记，需要人工评估后恢复，不能以反复重跑代替修复。非标准路径、masked/static/runtime-enabled 等 timer 状态会被拒绝，而不是猜测恢复。主机包、Docker daemon、其他项目和防火墙不在事务范围内。
+
+若旧版在**首次镜像构建**因上述不存在的标签失败，尚未启动服务，也没有本项目容器、数据卷或 pending 事务，不具备健康重跑基线。此特定情况可在更新源码后，将生成的 `deployment.env` 改名保留为独立备份，再按首次安装运行；保留原 `secrets/`，不删除或轮换密钥。若已有容器/数据卷、曾成功运行、配置有自定义或失败发生在迁移之后，不可据此重置配置，应按已有部署恢复流程处理。
 
 ### 5.5 不依赖 Docker 的部署回归测试
 

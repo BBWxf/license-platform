@@ -1,6 +1,6 @@
 # Production releases should replace version tags with publisher-verified sha256 digests.
-ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0.108-bookworm-slim
-ARG DOTNET_ASPNET_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0.8-bookworm-slim
+ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0.302-noble
+ARG DOTNET_ASPNET_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0.10-noble
 
 FROM ${DOTNET_SDK_IMAGE} AS build
 WORKDIR /src
