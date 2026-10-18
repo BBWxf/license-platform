@@ -1,0 +1,17 @@
+@page
+@model ErrorModel
+@{
+    ViewData["Title"] = "处理请求失败";
+}
+
+<div class="auth-shell">
+    <section class="auth-card text-center">
+        <div class="display-5 mb-3">请求处理失败</div>
+        <p class="text-muted">服务器未能完成本次操作。请稍后重试；如果问题持续，请在服务器执行 <code>sudo licensectl logs</code>。</p>
+        @if (Model.ShowRequestId)
+        {
+            <p class="small">请求编号：<code>@Model.RequestId</code></p>
+        }
+        <a class="btn btn-primary" asp-page="/Index">返回后台</a>
+    </section>
+</div>

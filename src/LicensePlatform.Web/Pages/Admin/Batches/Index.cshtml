@@ -1,0 +1,74 @@
+@page
+@model LicensePlatform.Web.Pages.Admin.Batches.IndexModel
+@{
+    ViewData["Title"] = "卡密批次";
+}
+
+<div class="page-heading">
+    <div>
+        <h1>卡密批次</h1>
+        <p>卡密明文只在生成后的短时间内允许下载一次。</p>
+    </div>
+    <a class="btn btn-primary" asp-page="Create">生成新批次</a>
+</div>
+
+<section class="panel">
+@if (Model.Batches.Count == 0)
+{
+    <div class="empty-state">尚未生成卡密批次。</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table">
+            <thead>
+            <tr>
+                <th>批次</th>
+                <th>产品</th>
+                <th>类型</th>
+                <th>数量</th>
+                <th>状态</th>
+                <th>UTC 创建时间</th>
+                <th class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var batch in Model.Batches)
+            {
+                var validity = batch.ValidityKind switch
+                {
+                    LicensePlatform.Web.Services.AdminValidityKind.Day => $"{batch.DurationUnits} 天",
+                    LicensePlatform.Web.Services.AdminValidityKind.Month => $"{batch.DurationUnits} 月（每月 30 天）",
+                    LicensePlatform.Web.Services.AdminValidityKind.Year => $"{batch.DurationUnits} 年（每年 365 天）",
+                    _ => "永久"
+                };
+                <tr>
+                    <td><strong>@batch.Name</strong><div class="small text-muted mono">@batch.Id</div></td>
+                    <td>@batch.ProductName</td>
+                    <td>@validity</td>
+                    <td>@batch.GeneratedCount / @batch.RequestedCount</td>
+                    <td>@batch.Status</td>
+                    <td class="text-nowrap">@batch.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")</td>
+                    <td class="text-end text-nowrap">
+                        @if (batch.ExportAvailable)
+                        {
+                            <a class="btn btn-sm btn-primary" asp-page-handler="Export" asp-route-id="@batch.Id">一次性下载 CSV</a>
+                        }
+                        <button class="btn btn-sm btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#disable-@batch.Id">禁用整批</button>
+                    </td>
+                </tr>
+                <tr class="collapse" id="disable-@batch.Id">
+                    <td colspan="7">
+                        <form method="post" asp-page-handler="DisableAll" class="d-flex gap-2 justify-content-end">
+                            <input type="hidden" name="id" value="@batch.Id" />
+                            <input class="form-control form-control-sm" style="max-width: 420px" name="reason" maxlength="300" placeholder="填写批量禁用原因" required />
+                            <button class="btn btn-sm btn-danger" type="submit">确认禁用</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+</section>

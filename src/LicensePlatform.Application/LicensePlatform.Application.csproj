@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>LicensePlatform.Application</RootNamespace>
+    <AssemblyName>LicensePlatform.Application</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../LicensePlatform.Domain/LicensePlatform.Domain.csproj" />
+    <ProjectReference Include="../LicensePlatform.Contracts/LicensePlatform.Contracts.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,28 @@
+# HTTPS 模板：由 `licensectl enable-https <domain-or-public-ipv4>` 事务化启用。
+# 不要只复制此文件；命令还会切换应用安全 Cookie、端口映射并验证受信任证书。
+
+{
+	admin off
+}
+
+{$CADDY_SITE_ADDRESS} {
+	encode zstd gzip
+
+	reverse_proxy app:8080 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# 首次 HTTPS 上线不要立即加 HSTS；证书续期和回滚已验证后再评审。
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

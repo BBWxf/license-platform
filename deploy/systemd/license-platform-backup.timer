@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily License Platform local backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=30m
+AccuracySec=1m
+Persistent=true
+Unit=license-platform-backup.service
+
+[Install]
+WantedBy=timers.target

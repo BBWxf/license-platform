@@ -1,0 +1,88 @@
+@inject IConfiguration Configuration
+@{
+    var systemName = Configuration["Branding:SystemName"] ?? "软件授权管理系统";
+    var insecureHttp = !Context.Request.IsHttps;
+}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - @systemName</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/LicensePlatform.Web.styles.css" asp-append-version="true" />
+</head>
+<body>
+@if (insecureHttp)
+{
+    <div class="security-warning" role="alert">
+        <strong>当前为公网明文 HTTP 模式。</strong>
+        登录密码、会话和激活卡密可能被网络监听；请尽快使用 <code>licensectl enable-https</code> 切换 HTTPS。
+    </div>
+}
+<header class="app-header">
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid app-shell">
+            <a class="navbar-brand" asp-page="/Index">
+                <span class="brand-mark"><img src="/brand/logo" alt="" onerror="this.remove();this.parentElement.textContent='授'" /></span>
+                <span>@systemName</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#primaryNavigation"
+                    aria-controls="primaryNavigation" aria-expanded="false" aria-label="展开导航">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="primaryNavigation">
+                @if (User.Identity?.IsAuthenticated == true)
+                {
+                    <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Dashboard">概览</a></li>
+                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Products/Index">产品</a></li>
+                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Batches/Index">卡密批次</a></li>
+                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Licenses/Index">授权查询</a></li>
+                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Audit/Index">审计日志</a></li>
+                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Settings/Index">系统设置</a></li>
+                    </ul>
+                    <div class="d-flex align-items-center gap-3 account-actions">
+                        <span>@User.Identity.Name</span>
+                        <form method="post" asp-page="/Account/Logout">
+                            <button class="btn btn-sm btn-outline-light" type="submit">退出</button>
+                        </form>
+                    </div>
+                }
+                else
+                {
+                    <div class="ms-auto">
+                        <a class="btn btn-sm btn-outline-light" asp-page="/Account/Login">管理员登录</a>
+                    </div>
+                }
+            </div>
+        </div>
+    </nav>
+</header>
+
+<main class="app-main app-shell" role="main">
+    @if (TempData["Success"] is string success)
+    {
+        <div class="alert alert-success" role="alert">@success</div>
+    }
+    @if (TempData["Error"] is string error)
+    {
+        <div class="alert alert-danger" role="alert">@error</div>
+    }
+    @RenderBody()
+</main>
+
+<footer class="app-footer">
+    <div class="app-shell d-flex flex-wrap justify-content-between gap-2">
+        <span>&copy; 2026 @systemName</span>
+        <span>授权协议 v1 · 服务端时间使用 UTC</span>
+    </div>
+</footer>
+
+<script src="~/lib/jquery/dist/jquery.min.js"></script>
+<script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+<script src="~/js/site.js" asp-append-version="true"></script>
+@await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

@@ -1,0 +1,185 @@
+name: license-platform
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: "${POSTGRES_IMAGE:?POSTGRES_IMAGE is required}"
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB is required}"
+      POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER is required}"
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    secrets:
+      - postgres_password
+    # File-backed secrets are root-owned on the host and group-readable only by
+    # this dedicated supplemental GID inside the containers.
+    group_add:
+      - "${SECRETS_GID:-20001}"
+    volumes:
+      # PostgreSQL 18+ image stores versioned PGDATA below /var/lib/postgresql.
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql
+        volume:
+          nocopy: true
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=$${POSTGRES_USER} --dbname=$${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    shm_size: "256m"
+    mem_limit: "${DB_MEMORY_LIMIT:-640m}"
+    cpus: "${DB_CPU_LIMIT:-0.80}"
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 60s
+    logging: *default-logging
+
+  app:
+    image: "${APP_IMAGE:?APP_IMAGE is required}"
+    build:
+      context: "${SOURCE_DIR:?SOURCE_DIR is required}"
+      dockerfile: Dockerfile
+      args:
+        DOTNET_SDK_IMAGE: "${DOTNET_SDK_IMAGE:?DOTNET_SDK_IMAGE is required}"
+        DOTNET_ASPNET_IMAGE: "${DOTNET_ASPNET_IMAGE:?DOTNET_ASPNET_IMAGE is required}"
+    restart: unless-stopped
+    # Keep the .NET image's unprivileged `app` identity (UID/GID 1654). A
+    # dedicated supplemental group grants read-only access to runtime secrets.
+    user: "1654:1654"
+    group_add:
+      - "${SECRETS_GID:-20001}"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB is required}"
+      POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER is required}"
+      HTTP_PORTS: "8080"
+      HTTPS_PORTS: ""
+      Security__AllowInsecureHttp: "${ALLOW_INSECURE_HTTP:-true}"
+      Security__HstsEnabled: "${HSTS_ENABLED:-false}"
+      Security__HstsIncludeSubDomains: "false"
+      Security__HstsMaxAgeDays: "30"
+      Security__CardLookupKeyFile: /run/secrets/card_lookup_key
+      Security__MasterEncryptionKeyFile: /run/secrets/master_encryption_key
+      Security__BootstrapAdminPasswordFile: /run/secrets/admin_initial_password
+      Security__DataProtectionPath: /app/data/data-protection
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |-
+        password_file=/run/secrets/postgres_password
+        password_length="$$(wc -c <"$$password_file")"
+        database_password="$$(tr -d '\r\n' <"$$password_file")"
+        if [ "$${#database_password}" -lt 40 ] || [ "$$password_length" -gt 130 ]; then
+          echo "invalid postgres password secret" >&2
+          exit 1
+        fi
+        case "$$database_password" in
+          *[!A-Za-z0-9+/=]*) echo "invalid postgres password secret" >&2; exit 1 ;;
+        esac
+        passfile=/tmp/.pgpass
+        umask 077
+        printf 'db:5432:%s:%s:%s\n' "$${POSTGRES_DB}" "$${POSTGRES_USER}" "$$database_password" >"$$passfile"
+        export ConnectionStrings__Database="Host=db;Port=5432;Database=$${POSTGRES_DB};Username=$${POSTGRES_USER};Passfile=$${passfile};SSL Mode=Disable"
+        unset database_password password_length password_file passfile
+        exec dotnet LicensePlatform.Web.dll "$$@"
+      - --
+    secrets:
+      - postgres_password
+      - card_lookup_key
+      - master_encryption_key
+      - admin_initial_password
+    volumes:
+      - app_data:/app/data
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      # Keep the image dependency-free: readiness here proves port 8080 is
+      # listening; health-check.sh separately verifies the real /health route.
+      test: ["CMD-SHELL", "grep -q ':1F90 ' /proc/net/tcp /proc/net/tcp6"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    read_only: true
+    cap_drop:
+      - ALL
+    mem_limit: "${APP_MEMORY_LIMIT:-640m}"
+    cpus: "${APP_CPU_LIMIT:-1.00}"
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  caddy:
+    image: "${CADDY_IMAGE:?CADDY_IMAGE is required}"
+    restart: unless-stopped
+    environment:
+      CADDY_SITE_ADDRESS: "${CADDY_SITE_ADDRESS:?CADDY_SITE_ADDRESS is required}"
+    ports:
+      - "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}:80:80/tcp"
+    volumes:
+      - "${CONFIG_DIR:?CONFIG_DIR is required}/Caddyfile:/etc/caddy/Caddyfile:ro"
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+      - backend
+    depends_on:
+      app:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    mem_limit: "${CADDY_MEMORY_LIMIT:-128m}"
+    cpus: "${CADDY_CPU_LIMIT:-0.20}"
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging: *default-logging
+
+networks:
+  edge:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:
+  app_data:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  postgres_password:
+    file: "${CONFIG_DIR:?CONFIG_DIR is required}/secrets/postgres_password"
+  card_lookup_key:
+    file: "${CONFIG_DIR:?CONFIG_DIR is required}/secrets/card_lookup_key"
+  master_encryption_key:
+    file: "${CONFIG_DIR:?CONFIG_DIR is required}/secrets/master_encryption_key"
+  admin_initial_password:
+    file: "${CONFIG_DIR:?CONFIG_DIR is required}/secrets/admin_initial_password"

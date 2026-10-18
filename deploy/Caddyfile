@@ -1,0 +1,29 @@
+# 警告：当前地址由 install.sh 固定为 http://<公网 IPv4>。
+# HTTP 不提供机密性、完整性或服务端身份认证，许可证、口令和令牌可能被窃听或篡改。
+# 这不是“安全部署”。请尽快执行 `licensectl enable-https <domain-or-public-ipv4>`。
+
+{
+	admin off
+}
+
+{$CADDY_SITE_ADDRESS} {
+	encode zstd gzip
+
+	reverse_proxy app:8080 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# HTTP 模式不得发送 Strict-Transport-Security；启用真实 HTTPS 后再配置 HSTS。
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

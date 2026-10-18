@@ -1,0 +1,102 @@
+@page
+@model LicensePlatform.Web.Pages.Admin.Licenses.IndexModel
+@{
+    ViewData["Title"] = "授权查询";
+    var totalPages = Math.Max(1, (int)Math.Ceiling(Model.Result.TotalCount / (double)Model.Result.PageSize));
+}
+
+<div class="page-heading">
+    <div>
+        <h1>授权查询</h1>
+        <p>可输入完整卡密、授权公开编号或设备绑定编号进行精确查询。</p>
+    </div>
+</div>
+
+<section class="panel mb-4">
+    <form method="get" class="row g-3 align-items-end">
+        <div class="col-lg-5">
+            <label class="form-label" for="query">查询内容</label>
+            <input class="form-control mono" id="query" name="query" value="@Model.Query" placeholder="完整卡密 / 授权编号 / 绑定编号" />
+        </div>
+        <div class="col-lg-3">
+            <label class="form-label" for="productId">产品</label>
+            <select class="form-select" id="productId" name="productId">
+                <option value="">全部产品</option>
+                @foreach (var product in Model.Result.Products)
+                {
+                    <option value="@product.Id" selected="@(Model.ProductId == product.Id)">@product.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-lg-2">
+            <label class="form-label" for="status">状态</label>
+            <select class="form-select" id="status" name="status">
+                <option value="">全部状态</option>
+                <option value="UNUSED" selected="@(Model.Status == "UNUSED")">未激活</option>
+                <option value="ACTIVE" selected="@(Model.Status == "ACTIVE")">有效</option>
+                <option value="EXPIRED" selected="@(Model.Status == "EXPIRED")">已过期</option>
+                <option value="DISABLED" selected="@(Model.Status == "DISABLED")">已禁用</option>
+            </select>
+        </div>
+        <div class="col-lg-2">
+            <button class="btn btn-primary w-100" type="submit">查询</button>
+        </div>
+    </form>
+</section>
+
+<section class="panel">
+    @if (Model.Result.Items.Count == 0)
+    {
+        <div class="empty-state">没有符合条件的授权。</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>授权编号</th>
+                    <th>产品</th>
+                    <th>卡密末四位</th>
+                    <th>状态</th>
+                    <th>首次激活 UTC</th>
+                    <th>到期 UTC</th>
+                    <th>版本</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var license in Model.Result.Items)
+                {
+                    var badge = license.Status switch
+                    {
+                        "ACTIVE" => "badge-active",
+                        "UNUSED" => "badge-unused",
+                        _ => "badge-disabled"
+                    };
+                    <tr>
+                        <td><code>@license.PublicId</code></td>
+                        <td>@license.ProductName</td>
+                        <td><code>****@license.CodeLast4</code></td>
+                        <td><span class="badge-state @badge">@license.Status</span></td>
+                        <td>@(license.FirstActivatedAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                        <td>@(license.ExpiresAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm") ?? "永久 / 未开始")</td>
+                        <td>@license.EntitlementVersion</td>
+                        <td class="text-end"><a class="btn btn-sm btn-outline-secondary" asp-page="Details" asp-route-id="@license.Id">详情</a></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        <nav class="d-flex justify-content-between align-items-center mt-3" aria-label="授权分页">
+            <span class="text-muted">共 @Model.Result.TotalCount 条，第 @Model.Result.Page / @totalPages 页</span>
+            <div class="btn-group">
+                <a class="btn btn-sm btn-outline-secondary @(Model.Result.Page <= 1 ? "disabled" : "")"
+                   asp-route-query="@Model.Query" asp-route-productId="@Model.ProductId" asp-route-status="@Model.Status" asp-route-pageNumber="@(Model.Result.Page - 1)">上一页</a>
+                <a class="btn btn-sm btn-outline-secondary @(Model.Result.Page >= totalPages ? "disabled" : "")"
+                   asp-route-query="@Model.Query" asp-route-productId="@Model.ProductId" asp-route-status="@Model.Status" asp-route-pageNumber="@(Model.Result.Page + 1)">下一页</a>
+            </div>
+        </nav>
+    }
+</section>

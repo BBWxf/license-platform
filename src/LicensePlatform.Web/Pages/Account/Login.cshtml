@@ -1,0 +1,41 @@
+@page
+@model LicensePlatform.Web.Pages.Account.LoginModel
+@{
+    ViewData["Title"] = "管理员登录";
+}
+
+<div class="auth-shell">
+    <section class="auth-card">
+        <div class="mb-4">
+            <h1>管理员登录</h1>
+            <p class="text-muted mb-0">请输入唯一的超级管理员账号。</p>
+        </div>
+
+        <form method="post" novalidate>
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+            <input asp-for="ReturnUrl" type="hidden" />
+
+            <div class="mb-3">
+                <label asp-for="Input.UserName" class="form-label"></label>
+                <input asp-for="Input.UserName" class="form-control" autocomplete="username" autofocus />
+                <span asp-validation-for="Input.UserName" class="text-danger"></span>
+            </div>
+
+            <div class="mb-4">
+                <label asp-for="Input.Password" class="form-label"></label>
+                <input asp-for="Input.Password" class="form-control" autocomplete="current-password" />
+                <span asp-validation-for="Input.Password" class="text-danger"></span>
+            </div>
+
+            <button class="btn btn-primary w-100" type="submit">登录管理后台</button>
+        </form>
+
+        <p class="form-text mt-3 mb-0">
+            忘记密码时，请登录服务器执行 <code>sudo licensectl reset-admin-password</code>。
+        </p>
+    </section>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

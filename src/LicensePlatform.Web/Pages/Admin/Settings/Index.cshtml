@@ -1,0 +1,50 @@
+@page
+@model LicensePlatform.Web.Pages.Admin.Settings.IndexModel
+@{
+    ViewData["Title"] = "系统设置";
+}
+
+<div class="page-heading">
+    <div>
+        <h1>系统设置</h1>
+        <p>修改后台名称和 Logo；卡密前缀在各产品中单独配置。</p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-xl-7">
+        <section class="panel">
+            <form method="post" enctype="multipart/form-data">
+                <div asp-validation-summary="ModelOnly" class="alert alert-danger"></div>
+                <div class="mb-3">
+                    <label asp-for="Input.SystemName" class="form-label">系统名称</label>
+                    <input asp-for="Input.SystemName" class="form-control" maxlength="80" />
+                    <span asp-validation-for="Input.SystemName" class="text-danger"></span>
+                </div>
+                <div class="mb-4">
+                    <label asp-for="Input.Logo" class="form-label">Logo</label>
+                    <input asp-for="Input.Logo" class="form-control" accept="image/png,image/jpeg" />
+                    <div class="form-text">支持 PNG 或 JPEG，最大 512KB。留空保留现有 Logo。</div>
+                    <span asp-validation-for="Input.Logo" class="text-danger"></span>
+                </div>
+                <button class="btn btn-primary" type="submit">保存设置</button>
+            </form>
+        </section>
+    </div>
+    <div class="col-xl-5">
+        <section class="panel">
+            <h2 class="h5 mb-3">实例信息</h2>
+            <dl class="row mb-0">
+                <dt class="col-sm-4">实例编号</dt><dd class="col-sm-8"><code>@Model.Settings.InstanceId</code></dd>
+                <dt class="col-sm-4">服务版本</dt><dd class="col-sm-8">@Model.Settings.Version</dd>
+                <dt class="col-sm-4">离线宽限</dt><dd class="col-sm-8">固定 6 小时</dd>
+                <dt class="col-sm-4">设备上限</dt><dd class="col-sm-8">每张卡 1 台</dd>
+                <dt class="col-sm-4">Logo</dt><dd class="col-sm-8">@(Model.Settings.HasLogo ? "已配置" : "使用默认标识")</dd>
+            </dl>
+        </section>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

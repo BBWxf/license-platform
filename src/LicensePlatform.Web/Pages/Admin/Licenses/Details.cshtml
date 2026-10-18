@@ -1,0 +1,120 @@
+@page "{id:guid}"
+@model LicensePlatform.Web.Pages.Admin.Licenses.DetailsModel
+@{
+    ViewData["Title"] = "授权详情";
+    var license = Model.License!;
+}
+
+<div class="page-heading">
+    <div>
+        <h1>授权详情</h1>
+        <p><code>@license.PublicId</code> · @license.ProductName</p>
+    </div>
+    <a class="btn btn-outline-secondary" asp-page="Index">返回查询</a>
+</div>
+
+<div class="row g-4">
+    <div class="col-xl-8">
+        <section class="panel mb-4">
+            <h2 class="h5 mb-3">基本信息</h2>
+            <dl class="row mb-0">
+                <dt class="col-sm-3">状态</dt><dd class="col-sm-9"><span class="badge-state @(license.Status == "ACTIVE" ? "badge-active" : license.Status == "UNUSED" ? "badge-unused" : "badge-disabled")">@license.Status</span></dd>
+                <dt class="col-sm-3">批次</dt><dd class="col-sm-9">@license.BatchName</dd>
+                <dt class="col-sm-3">卡密</dt><dd class="col-sm-9"><code>数据库仅保存末四位 ****@license.CodeLast4</code></dd>
+                <dt class="col-sm-3">首次激活 UTC</dt><dd class="col-sm-9">@(license.FirstActivatedAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未激活")</dd>
+                <dt class="col-sm-3">到期 UTC</dt><dd class="col-sm-9">@(license.ExpiresAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss") ?? (license.ValidityKind == LicensePlatform.Web.Services.AdminValidityKind.Permanent ? "永久" : "尚未开始"))</dd>
+                <dt class="col-sm-3">授权版本</dt><dd class="col-sm-9">@license.EntitlementVersion</dd>
+                @if (!string.IsNullOrWhiteSpace(license.DisabledReason))
+                {
+                    <dt class="col-sm-3">禁用原因</dt><dd class="col-sm-9">@license.DisabledReason</dd>
+                }
+            </dl>
+        </section>
+
+        <section class="panel">
+            <h2 class="h5 mb-3">设备绑定</h2>
+            @if (license.Bindings.Count == 0)
+            {
+                <div class="empty-state">此卡密尚未绑定设备。</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead><tr><th>绑定编号</th><th>状态</th><th>指纹摘要</th><th>激活 UTC</th><th>最近验证 UTC</th><th>客户端</th><th></th></tr></thead>
+                        <tbody>
+                        @foreach (var binding in license.Bindings)
+                        {
+                            <tr>
+                                <td><code>@binding.PublicId</code></td>
+                                <td>@binding.State</td>
+                                <td><code>@binding.FingerprintSummary</code></td>
+                                <td>@binding.ActivatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td>@(binding.LastValidatedAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                                <td>@(binding.LastClientVersion ?? "-")</td>
+                                <td class="text-end">
+                                @if (binding.State == "ACTIVE")
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" data-bs-toggle="collapse" data-bs-target="#unbind-@binding.Id" type="button">解绑</button>
+                                }
+                                </td>
+                            </tr>
+                            @if (binding.State == "ACTIVE")
+                            {
+                                <tr class="collapse" id="unbind-@binding.Id">
+                                    <td colspan="7">
+                                        <form method="post" asp-page-handler="Unbind" class="d-flex gap-2 justify-content-end">
+                                            <input type="hidden" name="bindingId" value="@binding.Id" />
+                                            <input class="form-control form-control-sm" style="max-width: 420px" asp-for="Action.Reason" placeholder="填写解绑原因" required />
+                                            <button class="btn btn-sm btn-danger" type="submit">确认解绑</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    </div>
+
+    <div class="col-xl-4">
+        <section class="panel mb-4">
+            <h2 class="h5">延期</h2>
+            <p class="text-muted small">已过期卡从当前时间恢复；未过期卡从原到期时间延长。</p>
+            <form method="post" asp-page-handler="Extend">
+                <div class="mb-3">
+                    <label asp-for="Extension.ValidityKind" class="form-label">单位</label>
+                    <select asp-for="Extension.ValidityKind" class="form-select">
+                        <option value="Day">天</option>
+                        <option value="Month">月（30 天）</option>
+                        <option value="Year">年（365 天）</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label asp-for="Extension.Units" class="form-label">数量</label>
+                    <input asp-for="Extension.Units" class="form-control" min="1" max="3650" />
+                </div>
+                <div class="mb-3">
+                    <label asp-for="Extension.Reason" class="form-label">原因</label>
+                    <textarea asp-for="Extension.Reason" class="form-control" rows="2" required></textarea>
+                </div>
+                <button class="btn btn-primary w-100" type="submit">确认延期</button>
+            </form>
+        </section>
+
+        <section class="panel">
+            <h2 class="h5">@(license.Enabled ? "禁用授权" : "重新启用")</h2>
+            <p class="text-muted small">禁用期间有效期仍继续流逝；客户端下次联网时收到失效结果。</p>
+            <form method="post" asp-page-handler="Toggle">
+                <input type="hidden" name="enabled" value="@(!license.Enabled)" />
+                <div class="mb-3">
+                    <label asp-for="Action.Reason" class="form-label">原因</label>
+                    <textarea asp-for="Action.Reason" class="form-control" rows="3" required></textarea>
+                </div>
+                <button class="btn w-100 @(license.Enabled ? "btn-danger" : "btn-success")" type="submit">@(license.Enabled ? "确认禁用" : "确认启用")</button>
+            </form>
+        </section>
+    </div>
+</div>

@@ -1,0 +1,24 @@
+<Window x:Class="Net8.Wpf.Sample.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title=".NET 8 Licensing Sample" Height="230" Width="680"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <TextBlock Text="License key" Margin="0,5,12,0" VerticalAlignment="Top" />
+        <PasswordBox x:Name="LicenseKey" Grid.Column="1" MinWidth="420" Padding="6" />
+        <Button x:Name="VerifyButton" Grid.Row="1" Grid.Column="1" Margin="0,12,0,0"
+                HorizontalAlignment="Left" Padding="14,7" Content="Activate / Verify" Click="VerifyButton_Click" />
+        <TextBlock x:Name="Status" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,18,0,0"
+                   Text="Enter a license key." TextWrapping="Wrap" />
+    </Grid>
+</Window>

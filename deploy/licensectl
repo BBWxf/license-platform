@@ -1,0 +1,691 @@
+#!/usr/bin/env bash
+# Administrative entry point for the License Platform deployment.
+
+set -Eeuo pipefail
+IFS=$'\n\t'
+umask 077
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+HOME_DIR="$(cd -- "$(dirname -- "${SELF}")" && pwd -P)"
+if [[ -d "${HOME_DIR}/bin" ]]; then
+  OPS_DIR="${HOME_DIR}/bin"
+else
+  OPS_DIR="${HOME_DIR}"
+fi
+export LICENSE_PLATFORM_HOME="${LICENSE_PLATFORM_HOME:-${HOME_DIR}}"
+
+reset_admin_password() (
+  set -Eeuo pipefail
+  local username="admin"
+  local password_file=""
+  local first_password=""
+  local second_password=""
+
+  while (($# > 0)); do
+    case "$1" in
+      --username)
+        (($# >= 2)) || fatal "--username 缺少值"
+        username="$2"
+        shift 2
+        ;;
+      --password-file)
+        (($# >= 2)) || fatal "--password-file 缺少值"
+        password_file="$2"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'USAGE'
+用法:
+  sudo licensectl reset-admin-password [--username admin]
+  sudo licensectl reset-admin-password [--username admin] --password-file <root 可读文件>
+
+不传 --password-file 时，从当前 TTY 隐藏读取并要求再次确认。密码不会进入命令行、
+环境变量或日志。管理员密码长度必须为 14 到 512 个字符。
+USAGE
+        exit 0
+        ;;
+      *) fatal "reset-admin-password 未知参数: $1" ;;
+    esac
+  done
+
+  require_root
+  require_command docker
+  require_command flock
+  load_deployment_env
+  [[ "${username}" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || fatal "管理员用户名只能包含 1 到 100 个 ASCII 字母、数字、点、下划线或连字符。"
+
+  exec 8>"${LP_DATA_DIR}/operation.lock"
+  flock --nonblock 8 || fatal "恢复、升级或其他独占运维任务正在运行。"
+  reject_pending_transactions
+
+  local temporary
+  temporary="$(mktemp "${LP_CONFIG_DIR}/secrets/.admin-reset.XXXXXX")"
+  cleanup_reset_secret() {
+    unset first_password second_password
+    rm -f -- "${temporary}"
+  }
+  trap cleanup_reset_secret EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  if [[ -n "${password_file}" ]]; then
+    [[ -f "${password_file}" && ! -L "${password_file}" ]] || fatal "密码文件缺失、不是普通文件或是符号链接。"
+    local password_bytes
+    password_bytes="$(wc -c <"${password_file}")"
+    [[ "${password_bytes}" =~ ^[0-9]+$ ]] && ((password_bytes >= 1 && password_bytes <= 16384)) \
+      || fatal "密码文件必须为 1 到 16384 字节。"
+    install -o root -g "${SECRETS_GID:-20001}" -m 0440 "${password_file}" "${temporary}"
+  else
+    [[ -r /dev/tty && -w /dev/tty ]] || fatal "没有可用 TTY；请改用 --password-file。"
+    printf '请输入新的管理员密码: ' >/dev/tty
+    IFS= read -r -s first_password </dev/tty || fatal "读取密码失败。"
+    printf '\n请再次输入新的管理员密码: ' >/dev/tty
+    IFS= read -r -s second_password </dev/tty || fatal "读取确认密码失败。"
+    printf '\n' >/dev/tty
+    [[ "${first_password}" == "${second_password}" ]] || fatal "两次输入的密码不一致。"
+    ((${#first_password} >= 14 && ${#first_password} <= 512)) || fatal "管理员密码长度必须为 14 到 512 个字符。"
+    printf '%s\n' "${first_password}" >"${temporary}"
+    chown root:"${SECRETS_GID:-20001}" "${temporary}"
+    chmod 0440 "${temporary}"
+    unset first_password second_password
+  fi
+
+  verify_runtime_secret_file "${temporary}"
+  log "通过一次性应用容器重置管理员密码。"
+  compose run --rm --no-deps \
+    --volume "${temporary}:/run/secrets/admin_reset_password:ro" \
+    app --admin-reset --username "${username}" --password-file /run/secrets/admin_reset_password
+  log "管理员 ${username} 的密码已重置，现有锁定状态已清除。"
+)
+
+enable_https() (
+  set -Eeuo pipefail
+  local target="${1:-}"
+  (($# == 1)) || fatal "用法: sudo licensectl enable-https <domain-or-public-ipv4>"
+  if [[ "${target}" == "-h" || "${target}" == "--help" ]]; then
+    cat <<'USAGE'
+用法:
+  sudo licensectl enable-https <domain-or-public-ipv4>
+
+域名必须已经把 A 记录解析到当前部署的固定公网 IPv4。公网 IPv4 证书是否可用取决于
+当前 Caddy/ACME 服务支持；若无法取得受信任证书，本命令会恢复原 HTTP 配置。
+USAGE
+    exit 0
+  fi
+
+  require_root
+  require_command docker
+  require_command flock
+  require_command curl
+  require_command ss
+  load_deployment_env
+
+  exec 8>"${LP_DATA_DIR}/operation.lock"
+  flock --nonblock 8 || fatal "已有恢复、升级或其他独占运维任务正在运行。"
+  reject_pending_transactions https-switch.pending
+
+  local transaction_file="${LP_DATA_DIR}/https-switch.pending"
+  recover_interrupted_https_switch() {
+    [[ -e "${transaction_file}" || -L "${transaction_file}" ]] || return 0
+    verify_root_0600_file "${transaction_file}"
+
+    local interrupted_state_dir
+    interrupted_state_dir="$(<"${transaction_file}")"
+    [[ -n "${interrupted_state_dir}" \
+      && "${interrupted_state_dir}" == "${LP_DATA_DIR}/rollback/https-"* \
+      && "${interrupted_state_dir}" != *$'\n'* \
+      && -f "${interrupted_state_dir}/deployment.env" \
+      && -f "${interrupted_state_dir}/Caddyfile" ]] || \
+      fatal "检测到无效的 HTTPS 事务标记；拒绝自动恢复: ${transaction_file}"
+
+    warn "检测到中断的 HTTPS 切换，先恢复事务前的 HTTP 配置。"
+    install -o root -g root -m 0600 "${interrupted_state_dir}/deployment.env" "${LP_ENV_FILE}"
+    install -o root -g root -m 0644 "${interrupted_state_dir}/Caddyfile" "${LP_CONFIG_DIR}/Caddyfile"
+    unset HTTPS_ENABLED ALLOW_INSECURE_HTTP HSTS_ENABLED CADDY_SITE_ADDRESS
+    load_deployment_env
+    [[ "${HTTPS_ENABLED:-false}" == "false" ]] || fatal "中断事务的回滚配置不是 HTTP 模式。"
+    compose config --quiet
+    compose up --detach --force-recreate app caddy
+    wait_for_service app 180
+    wait_for_service caddy 180
+    probe_public_health http "${PUBLIC_IPV4}" "${PUBLIC_IPV4}" 15 || \
+      fatal "中断的 HTTPS 切换未能恢复到已验证的 HTTP 健康状态。"
+    printf 'STATUS=ROLLED_BACK_AFTER_INTERRUPTION\n' >"${interrupted_state_dir}/state.env"
+    chown root:root "${interrupted_state_dir}/state.env"
+    chmod 0600 "${interrupted_state_dir}/state.env"
+    rm -f -- "${transaction_file}"
+    warn "中断的 HTTPS 切换已回滚并通过 HTTP 健康检查。"
+  }
+  recover_interrupted_https_switch
+
+  target="${target,,}"
+  target="${target%.}"
+  [[ -n "${target}" && ${#target} -le 253 ]] || fatal "HTTPS 地址为空或过长。"
+  [[ "${target}" != *"://"* && "${target}" != */* && "${target}" != *:* ]] || \
+    fatal "只传入域名或公网 IPv4，不要包含协议、端口或路径。"
+
+  validate_public_ipv4_target() {
+    local value="$1"
+    local a b c d octet
+    [[ "${value}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    IFS='.' read -r a b c d <<<"${value}"
+    for octet in "${a}" "${b}" "${c}" "${d}"; do
+      ((10#${octet} >= 0 && 10#${octet} <= 255)) || return 1
+    done
+    ((10#${a} >= 1 && 10#${a} <= 223)) || return 1
+    ((10#${a} != 10 && 10#${a} != 127)) || return 1
+    ! ((10#${a} == 100 && 10#${b} >= 64 && 10#${b} <= 127)) || return 1
+    ! ((10#${a} == 169 && 10#${b} == 254)) || return 1
+    ! ((10#${a} == 172 && 10#${b} >= 16 && 10#${b} <= 31)) || return 1
+    ! ((10#${a} == 192 && 10#${b} == 168)) || return 1
+    ! ((10#${a} == 192 && 10#${b} == 0 && 10#${c} == 2)) || return 1
+    ! ((10#${a} == 198 && 10#${b} == 51 && 10#${c} == 100)) || return 1
+    ! ((10#${a} == 203 && 10#${b} == 0 && 10#${c} == 113)) || return 1
+    ! ((10#${a} == 198 && (10#${b} == 18 || 10#${b} == 19))) || return 1
+  }
+
+  validate_domain_target() {
+    local value="$1"
+    local label
+    [[ "${value}" == *.* ]] || return 1
+    [[ "${value}" =~ ^[a-z0-9.-]+$ ]] || return 1
+    IFS='.' read -r -a labels <<<"${value}"
+    ((${#labels[@]} >= 2)) || return 1
+    for label in "${labels[@]}"; do
+      [[ -n "${label}" && ${#label} -le 63 ]] || return 1
+      [[ "${label}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || return 1
+    done
+  }
+
+  local target_kind="domain"
+  if [[ "${target}" =~ ^[0-9.]+$ ]]; then
+    validate_public_ipv4_target "${target}" || fatal "不是受支持的公网 IPv4。"
+    [[ "${target}" == "${PUBLIC_IPV4}" ]] || fatal "公网 IPv4 必须与当前部署的 PUBLIC_IPV4 一致。"
+    target_kind="ipv4"
+  else
+    validate_domain_target "${target}" || fatal "域名格式无效；只支持不含通配符的 ASCII 完整域名。"
+    require_command getent
+    local ipv4_count=0 address _rest
+    while IFS=' ' read -r address _rest; do
+      [[ "${address}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || continue
+      ((ipv4_count += 1))
+      [[ "${address}" == "${PUBLIC_IPV4}" ]] || \
+        fatal "域名 ${target} 还发布了其他 IPv4 地址 ${address}；当前单机切换拒绝多地址 DNS。"
+    done < <(getent ahostsv4 "${target}" || true)
+    ((ipv4_count > 0)) || fatal "域名 ${target} 当前没有 IPv4 A 记录。"
+
+    while IFS=' ' read -r address _rest; do
+      if [[ "${address}" == *:* && "${address}" != ::ffff:* ]]; then
+        fatal "域名 ${target} 还发布了 IPv6 地址 ${address}，但当前部署未监听公网 IPv6。"
+      fi
+    done < <(getent ahosts "${target}" || true)
+  fi
+
+  local site_address="https://${target}"
+  if [[ "${HTTPS_ENABLED:-false}" == "true" ]]; then
+    [[ "${CADDY_SITE_ADDRESS}" == "${site_address}" || "${CADDY_SITE_ADDRESS}" == "${target}" ]] || \
+      fatal "HTTPS 已为其他地址启用；本命令不会静默切换证书名称。"
+    log "HTTPS 已启用，执行健康检查。"
+    "${LP_HOME}/bin/health-check.sh"
+    exit 0
+  fi
+
+  check_https_port_free() {
+    local container_id binding host_binding
+    while IFS= read -r container_id; do
+      [[ -n "${container_id}" ]] || continue
+      while IFS= read -r binding; do
+        [[ -n "${binding}" ]] || continue
+        host_binding="${binding##* -> }"
+        case "${host_binding}" in
+          "${PUBLIC_IPV4}:443"|"0.0.0.0:443"|"[::]:443")
+            fatal "TCP/UDP 443 已由容器 ${container_id} 使用。"
+            ;;
+        esac
+      done < <(docker port "${container_id}" 2>/dev/null || true)
+    done < <(docker ps --filter publish=443 --format '{{.ID}}')
+
+    local _state _recv _send local_address _peer
+    while IFS=' ' read -r _state _recv _send local_address _peer; do
+      case "${local_address}" in
+        "${PUBLIC_IPV4}:443"|"0.0.0.0:443"|"*:443"|"[::]:443") fatal "主机 TCP 443 已被占用。" ;;
+      esac
+    done < <(ss -H -ltn 'sport = :443')
+    while IFS=' ' read -r _state _recv _send local_address _peer; do
+      case "${local_address}" in
+        "${PUBLIC_IPV4}:443"|"0.0.0.0:443"|"*:443"|"[::]:443") fatal "主机 UDP 443 已被占用。" ;;
+      esac
+    done < <(ss -H -lun 'sport = :443')
+  }
+  check_https_port_free
+
+  [[ -f "${LP_HOME}/Caddyfile.https" && ! -L "${LP_HOME}/Caddyfile.https" ]] || fatal "缺少受管 HTTPS Caddy 模板。"
+  [[ -f "${LP_HOME}/compose.https.yml" && ! -L "${LP_HOME}/compose.https.yml" ]] || fatal "缺少 HTTPS Compose override。"
+
+  log "验证 HTTPS Caddy 配置语法。"
+  docker run --rm --network none --read-only --cap-drop ALL \
+    --security-opt no-new-privileges:true \
+    --tmpfs /tmp:size=16m --tmpfs /data:size=16m --tmpfs /config:size=16m \
+    --env "CADDY_SITE_ADDRESS=${site_address}" \
+    --volume "${LP_HOME}/Caddyfile.https:/etc/caddy/Caddyfile:ro" \
+    "${CADDY_IMAGE}" validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+  log "确认当前 HTTP 回滚基线健康。"
+  probe_public_health http "${PUBLIC_IPV4}" "${PUBLIC_IPV4}" 15 || \
+    fatal "当前 HTTP 公网入口不健康，拒绝开始 HTTPS 切换。"
+
+  log "切换 HTTPS 前创建数据库、配置和密钥备份。"
+  LICENSE_PLATFORM_OPERATION_LOCK_HELD=1 "${LP_HOME}/bin/backup.sh" >/dev/null
+
+  local timestamp state_dir
+  timestamp="$(date --utc +%Y%m%dT%H%M%S.%NZ)"
+  state_dir="${LP_DATA_DIR}/rollback/https-${timestamp}"
+  install -d -o root -g root -m 0700 "${state_dir}"
+  cp --preserve=mode,ownership,timestamps "${LP_ENV_FILE}" "${state_dir}/deployment.env"
+  cp --preserve=mode,ownership,timestamps "${LP_CONFIG_DIR}/Caddyfile" "${state_dir}/Caddyfile"
+  chmod 0600 "${state_dir}/deployment.env"
+  chmod 0644 "${state_dir}/Caddyfile"
+
+  local switch_started=0 marker_temporary
+  perform_https_rollback() (
+    set -Eeuo pipefail
+    install -o root -g root -m 0600 "${state_dir}/deployment.env" "${LP_ENV_FILE}"
+    install -o root -g root -m 0644 "${state_dir}/Caddyfile" "${LP_CONFIG_DIR}/Caddyfile"
+    unset HTTPS_ENABLED ALLOW_INSECURE_HTTP HSTS_ENABLED CADDY_SITE_ADDRESS
+    load_deployment_env
+    [[ "${HTTPS_ENABLED:-false}" == "false" ]] || fatal "事务前配置不是 HTTP 模式，拒绝伪造回滚成功。"
+    compose config --quiet
+    compose up --detach --force-recreate app caddy
+    wait_for_service app 180
+    wait_for_service caddy 180
+    probe_public_health http "${PUBLIC_IPV4}" "${PUBLIC_IPV4}" 15
+  )
+  rollback_https_switch() {
+    local rc=$?
+    trap - EXIT INT TERM
+    set +e
+    if ((rc != 0 && switch_started == 1)); then
+      warn "HTTPS 切换失败，正在恢复并验证原 HTTP 配置。"
+      if perform_https_rollback; then
+        printf 'STATUS=ROLLED_BACK\n' >"${state_dir}/state.env"
+        chown root:root "${state_dir}/state.env"
+        chmod 0600 "${state_dir}/state.env"
+        rm -f -- "${transaction_file}"
+        warn "原 HTTP 配置已恢复，并通过固定公网 IPv4 的严格健康检查。"
+      else
+        printf 'STATUS=ROLLBACK_FAILED\n' >"${state_dir}/state.env" 2>/dev/null || true
+        chown root:root "${state_dir}/state.env" 2>/dev/null || true
+        chmod 0600 "${state_dir}/state.env" 2>/dev/null || true
+        warn "HTTPS 切换和 HTTP 回滚均失败；事务标记保留在 ${transaction_file}。"
+        exit 2
+      fi
+    fi
+    exit "${rc}"
+  }
+  trap rollback_https_switch EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  switch_started=1
+  [[ ! -e "${transaction_file}" && ! -L "${transaction_file}" ]] || \
+    fatal "HTTPS 事务标记已存在: ${transaction_file}"
+  marker_temporary="$(mktemp "${transaction_file}.XXXXXX")"
+  printf '%s\n' "${state_dir}" >"${marker_temporary}"
+  chown root:root "${marker_temporary}"
+  chmod 0600 "${marker_temporary}"
+  mv "${marker_temporary}" "${transaction_file}"
+  cat >"${state_dir}/state.env" <<STATE
+STATUS=SWITCHING
+TARGET=${target}
+STARTED_UTC=${timestamp}
+STATE
+  chown root:root "${state_dir}/state.env"
+  chmod 0600 "${state_dir}/state.env"
+
+  install -o root -g root -m 0644 "${LP_HOME}/Caddyfile.https" "${LP_CONFIG_DIR}/Caddyfile"
+  write_env_values "${LP_ENV_FILE}" \
+    CADDY_SITE_ADDRESS "${site_address}" \
+    HTTPS_ENABLED true \
+    ALLOW_INSECURE_HTTP false \
+    HSTS_ENABLED false
+  CADDY_SITE_ADDRESS="${site_address}"
+  HTTPS_ENABLED=true
+  ALLOW_INSECURE_HTTP=false
+  HSTS_ENABLED=false
+  export CADDY_SITE_ADDRESS HTTPS_ENABLED ALLOW_INSECURE_HTTP HSTS_ENABLED
+
+  compose config --quiet
+  log "重建应用和 Caddy，等待受信任证书签发；初始切换不会发送 HSTS。"
+  compose up --detach --force-recreate app caddy
+  wait_for_service app 180
+  wait_for_service caddy 180
+
+  local deadline=$((SECONDS + 300))
+  until probe_public_health https "${target}" "${PUBLIC_IPV4}" 15; do
+    ((SECONDS < deadline)) || fatal "HTTPS 证书或公网健康检查在 300 秒内未就绪。"
+    sleep 5
+  done
+  "${LP_HOME}/bin/health-check.sh"
+
+  cat >"${state_dir}/state.env" <<STATE
+STATUS=SUCCEEDED
+TARGET=${target}
+STARTED_UTC=${timestamp}
+STATE
+  chown root:root "${state_dir}/state.env"
+  chmod 0600 "${state_dir}/state.env"
+  rm -f -- "${transaction_file}"
+  switch_started=0
+  trap - EXIT INT TERM
+  log "HTTPS 已启用: ${site_address}"
+  log "HSTS 仍保持禁用；完成证书续期与回滚演练后再显式启用。"
+  if [[ "${target_kind}" == "ipv4" ]]; then
+    log "已通过公网 IPv4 证书完成验证；该证书通常为短期证书，请持续监控自动续期。"
+  fi
+  log "切换前配置保留在 ${state_dir}。"
+)
+
+enable_hsts() (
+  set -Eeuo pipefail
+  local confirm_value=""
+
+  while (($# > 0)); do
+    case "$1" in
+      --confirm-enable-hsts)
+        (($# >= 2)) || fatal "--confirm-enable-hsts 缺少值"
+        confirm_value="$2"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'USAGE'
+用法:
+  sudo licensectl enable-hsts --confirm-enable-hsts ENABLE-HSTS
+
+仅在 HTTPS、证书续期和回滚演练均已验证后使用。该命令启用 30 天 HSTS，默认不包含
+子域名。浏览器收到 HSTS 后会在有效期内强制使用 HTTPS；即使服务器随后恢复旧配置，
+也无法远程清除客户端已经缓存的策略。
+USAGE
+        exit 0
+        ;;
+      *) fatal "enable-hsts 未知参数: $1" ;;
+    esac
+  done
+
+  require_root
+  require_command docker
+  require_command flock
+  require_command curl
+  require_command grep
+  load_deployment_env
+  confirm_exact "${confirm_value}" "ENABLE-HSTS" "HSTS 会在客户端缓存且不能由服务器回滚，未获得精确确认"
+  [[ "${HTTPS_ENABLED:-false}" == "true" && "${ALLOW_INSECURE_HTTP:-true}" == "false" ]] || \
+    fatal "只能在已启用 HTTPS 且已禁用明文不安全模式时启用 HSTS。"
+
+  local host="${CADDY_SITE_ADDRESS#https://}"
+  host="${host%/}"
+  [[ "${CADDY_SITE_ADDRESS}" == "https://${host}" && -n "${host}" && "${host}" != */* && "${host}" != *:* ]] || \
+    fatal "当前 CADDY_SITE_ADDRESS 不是受支持的单域名或 IPv4 HTTPS 地址。"
+
+  exec 8>"${LP_DATA_DIR}/operation.lock"
+  flock --nonblock 8 || fatal "已有安装、恢复、升级或其他独占运维任务正在运行。"
+  reject_pending_transactions hsts-enable.pending
+
+  probe_hsts() {
+    local expected="$1" body_file header_file status body
+    body_file="$(mktemp "${TMPDIR:-/tmp}/license-platform-hsts-body.XXXXXX")"
+    header_file="$(mktemp "${TMPDIR:-/tmp}/license-platform-hsts-header.XXXXXX")"
+    if ! status="$(curl --disable --noproxy '*' --silent --show-error \
+        --connect-timeout 15 --max-time 15 --request GET \
+        --output "${body_file}" --dump-header "${header_file}" \
+        --write-out '%{http_code}' --proto '=https' \
+        --resolve "${host}:443:${PUBLIC_IPV4}" \
+        "https://${host}/health")"; then
+      rm -f -- "${body_file}" "${header_file}"
+      return 1
+    fi
+    body="$(<"${body_file}")"
+    if [[ "${status}" != "200" || "${body}" != '{"status":"healthy"}' ]]; then
+      rm -f -- "${body_file}" "${header_file}"
+      return 1
+    fi
+    if [[ "${expected}" == "present" ]]; then
+      if ! grep -Eiq '^Strict-Transport-Security:[[:space:]]*max-age=2592000[[:space:]]*\r?$' "${header_file}"; then
+        rm -f -- "${body_file}" "${header_file}"
+        return 1
+      fi
+      if grep -Eiq '^Strict-Transport-Security:.*includeSubDomains' "${header_file}"; then
+        rm -f -- "${body_file}" "${header_file}"
+        return 1
+      fi
+    fi
+    rm -f -- "${body_file}" "${header_file}"
+  }
+
+  local transaction_file="${LP_DATA_DIR}/hsts-enable.pending"
+  if [[ -e "${transaction_file}" || -L "${transaction_file}" ]]; then
+    verify_root_0600_file "${transaction_file}"
+    local interrupted_state_dir
+    interrupted_state_dir="$(<"${transaction_file}")"
+    [[ -n "${interrupted_state_dir}" && "${interrupted_state_dir}" == "${LP_DATA_DIR}/rollback/hsts-"* \
+      && "${interrupted_state_dir}" != *$'\n'* ]] || fatal "HSTS 事务标记无效，拒绝自动恢复。"
+    verify_root_0600_file "${interrupted_state_dir}/deployment.env"
+    warn "检测到中断的 HSTS 启用事务，先恢复事务前配置。客户端可能已经缓存过 HSTS。"
+    install -o root -g root -m 0600 "${interrupted_state_dir}/deployment.env" "${LP_ENV_FILE}"
+    unset HSTS_ENABLED
+    load_deployment_env
+    [[ "${HTTPS_ENABLED}" == "true" && "${HSTS_ENABLED}" == "false" ]] || fatal "HSTS 事务前配置不是可恢复的 HTTPS 非 HSTS 状态。"
+    compose config --quiet
+    compose up --detach --force-recreate app
+    wait_for_service app 180
+    wait_for_service caddy 120
+    "${LP_HOME}/bin/health-check.sh"
+    write_env_value "${interrupted_state_dir}/state.env" STATUS ROLLED_BACK_AFTER_INTERRUPTION
+    rm -f -- "${transaction_file}"
+    fatal "中断的 HSTS 事务已恢复；客户端可能仍缓存策略。确认 HTTPS 稳定后重新运行命令。"
+  fi
+
+  if [[ "${HSTS_ENABLED:-false}" == "true" ]]; then
+    "${LP_HOME}/bin/health-check.sh"
+    probe_hsts present || fatal "配置声明已启用 HSTS，但公网 HTTPS 响应未返回预期的 30 天策略。"
+    log "HSTS 已启用并通过公网响应头验证。"
+    exit 0
+  fi
+
+  log "确认 HTTPS 公网基线健康；不会忽略证书或跟随重定向。"
+  "${LP_HOME}/bin/health-check.sh"
+  probe_public_health https "${host}" "${PUBLIC_IPV4}" 15 || fatal "HTTPS 公网基线不健康，拒绝启用 HSTS。"
+
+  log "启用 HSTS 前创建数据库、配置和密钥备份。"
+  LICENSE_PLATFORM_OPERATION_LOCK_HELD=1 "${LP_HOME}/bin/backup.sh" >/dev/null
+
+  local timestamp state_dir marker_temporary switch_started=0
+  timestamp="$(date --utc +%Y%m%dT%H%M%S.%NZ)"
+  state_dir="${LP_DATA_DIR}/rollback/hsts-${timestamp}"
+  install -d -o root -g root -m 0700 "${state_dir}"
+  install -o root -g root -m 0600 "${LP_ENV_FILE}" "${state_dir}/deployment.env"
+  cat >"${state_dir}/state.env" <<STATE
+STATUS=PREPARED
+STARTED_UTC=${timestamp}
+MAX_AGE_SECONDS=2592000
+INCLUDE_SUBDOMAINS=false
+STATE
+  chown root:root "${state_dir}/state.env"
+  chmod 0600 "${state_dir}/state.env"
+
+  rollback_hsts_enable() {
+    local rc=$?
+    trap - EXIT INT TERM
+    if ((rc != 0 && switch_started == 1)); then
+      warn "HSTS 启用失败，正在恢复事务前服务器配置；已收到响应的客户端仍可能缓存策略。"
+      if (
+        set -Eeuo pipefail
+        install -o root -g root -m 0600 "${state_dir}/deployment.env" "${LP_ENV_FILE}"
+        unset HSTS_ENABLED
+        load_deployment_env
+        compose config --quiet
+        compose up --detach --force-recreate app
+        wait_for_service app 180
+        wait_for_service caddy 120
+        "${LP_HOME}/bin/health-check.sh"
+      ); then
+        write_env_value "${state_dir}/state.env" STATUS ROLLED_BACK
+        rm -f -- "${transaction_file}"
+        warn "服务器已恢复为不发送 HSTS，并通过 HTTPS 健康检查；客户端缓存无法由此撤销。"
+      else
+        write_env_value "${state_dir}/state.env" STATUS ROLLBACK_FAILED 2>/dev/null || true
+        warn "HSTS 启用和服务器配置恢复均失败；事务标记保留在 ${transaction_file}。"
+        exit 2
+      fi
+    fi
+    exit "${rc}"
+  }
+  trap rollback_hsts_enable EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  marker_temporary="$(mktemp "${transaction_file}.XXXXXX")"
+  printf '%s\n' "${state_dir}" >"${marker_temporary}"
+  chown root:root "${marker_temporary}"
+  chmod 0600 "${marker_temporary}"
+  mv -- "${marker_temporary}" "${transaction_file}"
+  switch_started=1
+
+  write_env_value "${LP_ENV_FILE}" HSTS_ENABLED true
+  unset HSTS_ENABLED
+  load_deployment_env
+  [[ "${HTTPS_ENABLED}" == "true" && "${ALLOW_INSECURE_HTTP}" == "false" && "${HSTS_ENABLED}" == "true" ]] || \
+    fatal "HSTS 配置未正确持久化。"
+  compose config --quiet
+  compose up --detach --force-recreate app
+  wait_for_service app 180
+  wait_for_service caddy 120
+  "${LP_HOME}/bin/health-check.sh"
+  probe_hsts present || fatal "公网 HTTPS 响应未返回精确的 30 天 HSTS，或意外包含 includeSubDomains。"
+
+  write_env_value "${state_dir}/state.env" STATUS SUCCEEDED
+  rm -f -- "${transaction_file}"
+  switch_started=0
+  trap - EXIT INT TERM
+  log "HSTS 已启用并验证：max-age=2592000（30 天），不包含 includeSubDomains。"
+  warn "浏览器缓存现在不能通过服务器回滚清除；必须持续保证该 HTTPS 地址可用。"
+  log "事务前配置保留在 ${state_dir}。"
+)
+
+usage() {
+  cat <<'USAGE'
+License Platform 运维命令
+
+  licensectl health
+  licensectl status
+  licensectl logs [db|app|caddy] [--follow]
+  licensectl backup
+  licensectl restore ...
+  licensectl upgrade ...
+  licensectl rollback ...
+  licensectl reset-admin-password [--username admin]
+  licensectl enable-https <domain-or-public-ipv4>
+  licensectl enable-hsts --confirm-enable-hsts ENABLE-HSTS
+  licensectl restart --confirm-restart RESTART
+  licensectl timer-status
+
+restore/upgrade/rollback/reset-admin-password/enable-https/enable-hsts 的参数可用对应命令 --help 查看。
+所有容器操作都限定在 license-platform Compose 项目内。
+USAGE
+}
+
+COMMAND="${1:-help}"
+if (($# > 0)); then
+  shift
+fi
+
+case "${COMMAND}" in
+  help|-h|--help)
+    usage
+    ;;
+  health)
+    exec "${OPS_DIR}/health-check.sh" "$@"
+    ;;
+  backup)
+    exec "${OPS_DIR}/backup.sh" "$@"
+    ;;
+  restore)
+    exec "${OPS_DIR}/restore.sh" "$@"
+    ;;
+  upgrade)
+    exec "${OPS_DIR}/upgrade.sh" "$@"
+    ;;
+  rollback)
+    exec "${OPS_DIR}/rollback.sh" "$@"
+    ;;
+  reset-admin-password)
+    # shellcheck source=deploy/lib/common.sh
+    source "${HOME_DIR}/lib/common.sh"
+    reset_admin_password "$@"
+    ;;
+  enable-https)
+    # shellcheck source=deploy/lib/common.sh
+    source "${HOME_DIR}/lib/common.sh"
+    enable_https "$@"
+    ;;
+  enable-hsts)
+    # shellcheck source=deploy/lib/common.sh
+    source "${HOME_DIR}/lib/common.sh"
+    enable_hsts "$@"
+    ;;
+  status)
+    # shellcheck source=deploy/lib/common.sh
+    source "${HOME_DIR}/lib/common.sh"
+    require_root
+    load_deployment_env
+    compose ps
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl --no-pager status license-platform-backup.timer || true
+    fi
+    ;;
+  logs)
+    # shellcheck source=deploy/lib/common.sh
+    source "${HOME_DIR}/lib/common.sh"
+    require_root
+    load_deployment_env
+    service="${1:-}"
+    follow=""
+    if [[ -n "${service}" ]]; then
+      case "${service}" in db|app|caddy) shift ;; --follow) service="" ;; *) fatal "服务必须是 db、app 或 caddy。" ;; esac
+    fi
+    if [[ "${1:-}" == "--follow" || "${service:-}" == "--follow" ]]; then
+      follow="--follow"
+      if [[ "${1:-}" == "--follow" ]]; then
+        shift
+      fi
+    fi
+    (($# == 0)) || fatal "logs 参数无效。"
+    log_args=(--no-color --tail 200)
+    [[ -n "${follow}" ]] && log_args+=("${follow}")
+    if [[ -n "${service}" ]]; then
+      log_args+=("${service}")
+    fi
+    compose logs "${log_args[@]}"
+    ;;
+  restart)
+    # shellcheck source=deploy/lib/common.sh
+    source "${HOME_DIR}/lib/common.sh"
+    require_root
+    load_deployment_env
+    [[ "${1:-}" == "--confirm-restart" && "${2:-}" == "RESTART" && $# -eq 2 ]] || \
+      fatal "重启仅限本项目 app/caddy；请使用 --confirm-restart RESTART。"
+    compose restart app caddy
+    wait_for_service app 180
+    wait_for_service caddy 120
+    exec "${OPS_DIR}/health-check.sh"
+    ;;
+  timer-status)
+    [[ ${EUID} -eq 0 ]] || { printf '此操作必须以 root 身份运行。\n' >&2; exit 1; }
+    systemctl --no-pager status license-platform-backup.timer
+    systemctl --no-pager list-timers license-platform-backup.timer
+    ;;
+  *)
+    usage >&2
+    printf '未知命令: %s\n' "${COMMAND}" >&2
+    exit 2
+    ;;
+esac

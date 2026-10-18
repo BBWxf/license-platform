@@ -1,0 +1,46 @@
+# .NET build output
+**/bin/
+**/obj/
+artifacts/
+TestResults/
+
+# IDE and user files
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Coverage and logs
+coverage/
+*.coverage
+*.coveragexml
+*.trx
+*.log
+
+# Local secrets and environment
+.env
+.env.*
+!.env.example
+secrets.json
+appsettings.*.local.json
+test-database.connection
+*.test-database.connection
+.pgpass
+
+# Machine-local configuration and runtime secrets
+/.claude/settings.local.json
+/src/LicensePlatform.Web/appsettings.Development.json
+/.dev-secrets/
+/.dev-data/
+secrets/
+/backups/
+*.pfx
+*.p12
+*.key
+
+# OS files
+.DS_Store
+Thumbs.db

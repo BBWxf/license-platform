@@ -1,0 +1,38 @@
+[Unit]
+Description=License Platform local backup
+Documentation=file:/opt/license-platform/docs/backup-restore.md
+Requires=docker.service
+After=docker.service
+ConditionPathExists=/etc/license-platform/deployment.env
+ConditionPathIsExecutable=/opt/license-platform/bin/backup.sh
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+RuntimeDirectory=license-platform-backup
+RuntimeDirectoryMode=0700
+Environment=HOME=/run/license-platform-backup
+WorkingDirectory=/opt/license-platform
+ExecStart=/opt/license-platform/bin/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/backups/license-platform /var/lib/license-platform
+ReadOnlyPaths=/etc/license-platform /opt/license-platform /run/docker.sock
+TimeoutStartSec=1h

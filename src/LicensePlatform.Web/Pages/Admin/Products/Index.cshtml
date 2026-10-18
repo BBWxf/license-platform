@@ -1,0 +1,72 @@
+@page
+@model LicensePlatform.Web.Pages.Admin.Products.IndexModel
+@{
+    ViewData["Title"] = "产品管理";
+}
+
+<div class="page-heading">
+    <div>
+        <h1>产品管理</h1>
+        <p>每个产品使用独立的公开编号和服务端签名密钥。</p>
+    </div>
+    <a class="btn btn-primary" asp-page="Edit">新建产品</a>
+</div>
+
+<section class="panel">
+@if (Model.Products.Count == 0)
+{
+    <div class="empty-state">
+        <p>还没有产品。</p>
+        <a class="btn btn-primary" asp-page="Edit">创建第一个产品</a>
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table">
+            <thead>
+            <tr>
+                <th>产品</th>
+                <th>公开编号</th>
+                <th>卡密前缀</th>
+                <th>卡密数</th>
+                <th>活动设备</th>
+                <th>状态</th>
+                <th class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var product in Model.Products)
+            {
+                <tr>
+                    <td>
+                        <strong>@product.Name</strong>
+                        <div class="text-muted small">创建于 @product.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd") UTC</div>
+                    </td>
+                    <td><code>@product.PublicCode</code></td>
+                    <td><code>@product.LicensePrefix</code></td>
+                    <td>@product.LicenseCount</td>
+                    <td>@product.ActiveBindingCount</td>
+                    <td>
+                        <span class="badge-state @(product.Enabled ? "badge-enabled" : "badge-disabled")">
+                            @(product.Enabled ? "已启用" : "已停用")
+                        </span>
+                    </td>
+                    <td class="text-end text-nowrap">
+                        <a class="btn btn-sm btn-outline-secondary" asp-page="Edit" asp-route-id="@product.Id">编辑</a>
+                        <a class="btn btn-sm btn-outline-secondary" asp-page-handler="ClientConfig" asp-route-id="@product.Id">客户端配置</a>
+                        <form class="d-inline" method="post" asp-page-handler="Toggle">
+                            <input type="hidden" name="id" value="@product.Id" />
+                            <input type="hidden" name="enabled" value="@(!product.Enabled)" />
+                            <button class="btn btn-sm @(product.Enabled ? "btn-outline-danger" : "btn-outline-success")" type="submit">
+                                @(product.Enabled ? "停用" : "启用")
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+</section>

@@ -1,0 +1,7 @@
+# Optional override for the documented future domain/HTTPS migration.
+# It is loaded by licensectl only when HTTPS_ENABLED=true in deployment.env.
+services:
+  caddy:
+    ports:
+      - "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}:443:443/tcp"
+      - "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}:443:443/udp"

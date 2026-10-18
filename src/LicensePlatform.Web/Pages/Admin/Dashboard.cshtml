@@ -1,0 +1,94 @@
+@page
+@model LicensePlatform.Web.Pages.Admin.DashboardModel
+@{
+    ViewData["Title"] = "系统概览";
+}
+
+<div class="page-heading">
+    <div>
+        <h1>系统概览</h1>
+        <p>查看产品、授权、设备绑定和最近管理操作。</p>
+    </div>
+    <a class="btn btn-primary" asp-page="/Admin/Batches/Create">生成卡密</a>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-xl">
+        <div class="metric-card">
+            <div class="metric-label">产品</div>
+            <div class="metric-value">@Model.Snapshot.ProductCount</div>
+            <div class="metric-help">已创建的软件产品</div>
+        </div>
+    </div>
+    <div class="col-6 col-xl">
+        <div class="metric-card">
+            <div class="metric-label">未激活卡密</div>
+            <div class="metric-value">@Model.Snapshot.UnusedLicenseCount</div>
+            <div class="metric-help">有效期尚未开始</div>
+        </div>
+    </div>
+    <div class="col-6 col-xl">
+        <div class="metric-card">
+            <div class="metric-label">有效授权</div>
+            <div class="metric-value">@Model.Snapshot.ActiveLicenseCount</div>
+            <div class="metric-help">当前可用的授权</div>
+        </div>
+    </div>
+    <div class="col-6 col-xl">
+        <div class="metric-card">
+            <div class="metric-label">已过期</div>
+            <div class="metric-value">@Model.Snapshot.ExpiredLicenseCount</div>
+            <div class="metric-help">业务有效期已结束</div>
+        </div>
+    </div>
+    <div class="col-6 col-xl">
+        <div class="metric-card">
+            <div class="metric-label">活动设备</div>
+            <div class="metric-value">@Model.Snapshot.ActiveBindingCount</div>
+            <div class="metric-help">当前绑定设备数</div>
+        </div>
+    </div>
+</div>
+
+<section class="panel">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2 class="h5 mb-1">最近操作</h2>
+            <p class="text-muted mb-0">仅显示脱敏后的管理员审计事件。</p>
+        </div>
+        <a asp-page="/Admin/Audit/Index">查看全部</a>
+    </div>
+
+    @if (Model.Snapshot.RecentAuditEvents.Count == 0)
+    {
+        <div class="empty-state">尚无审计记录。</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                <tr>
+                    <th>UTC 时间</th>
+                    <th>操作</th>
+                    <th>对象</th>
+                    <th>结果</th>
+                    <th>摘要</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var item in Model.Snapshot.RecentAuditEvents)
+                {
+                    <tr>
+                        <td class="text-nowrap">@item.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td><span class="mono">@item.Action</span></td>
+                        <td>@item.TargetType</td>
+                        <td>@item.Result</td>
+                        <td>@(item.Summary ?? "-")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
