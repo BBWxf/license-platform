@@ -135,3 +135,15 @@ node --test tests/Deployment/*.test.mjs
 最终源码的 `node --test tests/Deployment/*.test.mjs`：**123 项通过、0 失败、0 跳过**（镜像选择 2 项、网络 91 项、事务 30 项，约 100 秒）。安装器 shell 语法、变动测试 runner 的 Node 语法及 diff 空白检查通过。
 
 未执行容器拉取/构建/启动、Compose config、systemd 或 .NET 应用重跑；运行时镜像的补丁升级尚未经真实容器验收。此前 Windows .NET 10.0.8 应用基线保持独立，不冒充本次 Linux 运行时 10.0.10 的执行结果。
+
+## 9. 后台审计 JSON 查询修复
+
+2026-10-18 用户服务器报告：基础设施和 `/health` 正常，但后台首页请求因 PostgreSQL `42883: function substring(jsonb, integer, integer) does not exist` 失败。`DataJson` 为 CLR string、数据库类型为 jsonb；将其 `.Length` / `.Substring` 放在 EF 查询投影中会产生 JSON 属性访问和不适用的字符串函数。审计列表也存在相同写法。
+
+修复限定为首页及审计列表读取：数据库继续执行排序、过滤及最近 10 条/分页限制，只返回列表必需的原始字段；查询物化后在 .NET 内存中分别截断为 160/220 字符摘要。没有数据库模型、迁移、密钥或管理员凭据变更。健康端点检查不覆盖后台页面查询，因此健康通过不能代替业务页面验收。
+
+新增回归先验证旧生产代码：17 项中 15 项行为测试通过，但两项 Npgsql SQL 断言均因包含 `substring(a.data_json, ...)` 失败，复现了 InMemory 单独测试无法检出的 provider 翻译问题。SQL 用例通过 `IQueryExpressionInterceptor` 捕获实际服务使用的分页表达式，仅替换 provider 根并绑定已提取的标量参数，再由真实 Npgsql provider 生成 SQL；不是在测试中另写一条正确查询。模拟连接在生成前后均保持 Closed，无需连接数据库。
+
+修复后 Release 重新构建并执行完整 `Web.Tests`：**214 项通过、0 失败、0 跳过**，包括新增 17 项。行为覆盖最近 10 条、过滤后分页与总数、空集/无匹配/越界页、参数钳制、字段回退及 160/220 字符边界；SQL 回归确认原始 JSON 列读取保留数据库排序/过滤/分页，且不再含 `substring` 或 JSON `Length` 提取。
+
+同时重跑未改动项目的现有 Release 产物：Domain 19 项通过、Integration 37 项通过/2 项跳过、Client 65 项通过；本轮合计 **335 项通过、2 项明确跳过、0 项失败**。使用完整临时 SDK 10.0.108 和第 1 节旧 Windows workaround；Client 仍实际运行于 .NET 10.0.8（Major roll-forward）。两个真实 PostgreSQL 18 测试未配置而跳过；本次新增 SQL 用例只生成查询、不连接数据库。变更 C# 文件的 `dotnet format --verify-no-changes --no-restore --include ...` 通过。未执行真实 Docker、用户服务器升级或真实数据库下的后台页面验收。

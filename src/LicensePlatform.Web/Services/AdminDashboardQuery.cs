@@ -27,17 +27,26 @@ public sealed class AdminDashboardQuery(
         var bindings = await dbContext.DeviceBindings.LongCountAsync(
             item => item.UnboundAtUtc == null,
             cancellationToken);
-        var recent = await dbContext.AuditRecords
+        var recentRows = await dbContext.AuditRecords
             .AsNoTracking()
             .OrderByDescending(item => item.OccurredAtUtc)
             .Take(10)
-            .Select(item => new RecentAuditItem(
+            .Select(item => new
+            {
                 item.OccurredAtUtc,
                 item.Action,
                 item.EntityType,
-                "RECORDED",
-                item.DataJson.Length > 160 ? item.DataJson.Substring(0, 160) + "…" : item.DataJson))
+                item.DataJson
+            })
             .ToListAsync(cancellationToken);
+
+        // DataJson is jsonb; format summaries only after the bounded query is materialized.
+        var recent = recentRows.Select(item => new RecentAuditItem(
+            item.OccurredAtUtc,
+            item.Action,
+            item.EntityType,
+            "RECORDED",
+            item.DataJson.Length > 160 ? item.DataJson.Substring(0, 160) + "…" : item.DataJson)).ToList();
 
         return new AdminDashboardSnapshot(productCount, unused, active, expired, bindings, recent);
     }

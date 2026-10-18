@@ -21,20 +21,33 @@ public sealed class AuditAdminService(LicensePlatformDbContext dbContext) : IAud
         }
 
         var total = await query.LongCountAsync(cancellationToken);
-        var items = await query
+        var rows = await query
             .OrderByDescending(item => item.OccurredAtUtc)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(item => new AuditListItem(
+            .Select(item => new
+            {
                 item.OccurredAtUtc,
-                item.ActorId ?? item.ActorType.ToString(),
+                item.ActorId,
+                item.ActorType,
                 item.Action,
                 item.EntityType,
                 item.EntityId,
-                "RECORDED",
-                item.IpAddress ?? "-",
-                item.DataJson.Length > 220 ? item.DataJson.Substring(0, 220) + "…" : item.DataJson))
+                item.IpAddress,
+                item.DataJson
+            })
             .ToListAsync(cancellationToken);
+
+        // DataJson is jsonb; format summaries only after the bounded query is materialized.
+        var items = rows.Select(item => new AuditListItem(
+            item.OccurredAtUtc,
+            item.ActorId ?? item.ActorType.ToString(),
+            item.Action,
+            item.EntityType,
+            item.EntityId,
+            "RECORDED",
+            item.IpAddress ?? "-",
+            item.DataJson.Length > 220 ? item.DataJson.Substring(0, 220) + "…" : item.DataJson)).ToList();
 
         return new AuditSearchResult(items, page, pageSize, total);
     }
