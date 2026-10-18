@@ -8,11 +8,14 @@
 <div class="page-heading">
     <div>
         <h1>授权查询</h1>
-        <p>可输入完整卡密、授权公开编号或设备绑定编号进行精确查询。</p>
+        <p>可输入完整卡密、授权公开编号或设备绑定编号进行精确查询；列表仅显示卡密末四位。</p>
     </div>
 </div>
 
-<section class="panel mb-4">
+<section class="panel filter-panel mb-4">
+    <div class="panel-heading">
+        <h2 class="h5 mb-0">筛选授权</h2>
+    </div>
     <form method="get" class="row g-3 align-items-end">
         <div class="col-lg-5">
             <label class="form-label" for="query">查询内容</label>
@@ -38,31 +41,37 @@
                 <option value="DISABLED" selected="@(Model.Status == "DISABLED")">已禁用</option>
             </select>
         </div>
-        <div class="col-lg-2">
+        <div class="col-lg-2 filter-actions">
             <button class="btn btn-primary w-100" type="submit">查询</button>
         </div>
     </form>
 </section>
 
 <section class="panel">
+    <div class="panel-heading">
+        <h2 class="h5 mb-0">授权列表</h2>
+    </div>
     @if (Model.Result.Items.Count == 0)
     {
-        <div class="empty-state">没有符合条件的授权。</div>
+        <div class="empty-state">
+            <h3 class="h6">没有符合条件的授权</h3>
+            <p>请检查查询内容，或调整产品与状态筛选条件。</p>
+        </div>
     }
     else
     {
-        <div class="table-responsive">
+        <div class="table-responsive" role="region" aria-label="授权查询结果，可横向滚动" tabindex="0">
             <table class="table">
                 <thead>
                 <tr>
-                    <th>授权编号</th>
-                    <th>产品</th>
-                    <th>卡密末四位</th>
-                    <th>状态</th>
-                    <th>首次激活 UTC</th>
-                    <th>到期 UTC</th>
-                    <th>版本</th>
-                    <th></th>
+                    <th scope="col">授权编号</th>
+                    <th scope="col">产品</th>
+                    <th scope="col">卡密末四位</th>
+                    <th scope="col">状态</th>
+                    <th scope="col">首次激活（UTC）</th>
+                    <th scope="col">到期时间（UTC）</th>
+                    <th scope="col" class="numeric">版本</th>
+                    <th scope="col" class="text-end">操作</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -72,29 +81,45 @@
                     {
                         "ACTIVE" => "badge-active",
                         "UNUSED" => "badge-unused",
-                        _ => "badge-disabled"
+                        "EXPIRED" => "badge-expired",
+                        "DISABLED" => "badge-disabled",
+                        _ => "badge-neutral"
+                    };
+                    var stateLabel = license.Status switch
+                    {
+                        "ACTIVE" => "有效",
+                        "UNUSED" => "未激活",
+                        "EXPIRED" => "已过期",
+                        "DISABLED" => "已禁用",
+                        _ => license.Status
                     };
                     <tr>
-                        <td><code>@license.PublicId</code></td>
-                        <td>@license.ProductName</td>
-                        <td><code>****@license.CodeLast4</code></td>
-                        <td><span class="badge-state @badge">@license.Status</span></td>
-                        <td>@(license.FirstActivatedAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
-                        <td>@(license.ExpiresAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm") ?? "永久 / 未开始")</td>
-                        <td>@license.EntitlementVersion</td>
-                        <td class="text-end"><a class="btn btn-sm btn-outline-secondary" asp-page="Details" asp-route-id="@license.Id">详情</a></td>
+                        <td class="cell-id"><code>@license.PublicId</code></td>
+                        <td class="cell-primary">@license.ProductName</td>
+                        <td class="cell-id"><code>****@license.CodeLast4</code></td>
+                        <td><span class="badge-state @badge">@stateLabel</span></td>
+                        <td class="table-time">@(license.FirstActivatedAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm") ?? "尚未激活")</td>
+                        <td class="table-time">@(license.ExpiresAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm") ?? "永久 / 未开始")</td>
+                        <td class="numeric">@license.EntitlementVersion</td>
+                        <td>
+                            <div class="table-actions justify-content-end">
+                                <a class="btn btn-sm btn-outline-secondary" asp-page="Details" asp-route-id="@license.Id">详情</a>
+                            </div>
+                        </td>
                     </tr>
                 }
                 </tbody>
             </table>
         </div>
 
-        <nav class="d-flex justify-content-between align-items-center mt-3" aria-label="授权分页">
-            <span class="text-muted">共 @Model.Result.TotalCount 条，第 @Model.Result.Page / @totalPages 页</span>
+        <nav class="pagination-bar" aria-label="授权分页">
+            <span class="cell-secondary">共 @Model.Result.TotalCount 条，第 @Model.Result.Page / @totalPages 页</span>
             <div class="btn-group">
                 <a class="btn btn-sm btn-outline-secondary @(Model.Result.Page <= 1 ? "disabled" : "")"
+                   aria-disabled="@(Model.Result.Page <= 1 ? "true" : "false")" tabindex="@(Model.Result.Page <= 1 ? "-1" : "0")"
                    asp-route-query="@Model.Query" asp-route-productId="@Model.ProductId" asp-route-status="@Model.Status" asp-route-pageNumber="@(Model.Result.Page - 1)">上一页</a>
                 <a class="btn btn-sm btn-outline-secondary @(Model.Result.Page >= totalPages ? "disabled" : "")"
+                   aria-disabled="@(Model.Result.Page >= totalPages ? "true" : "false")" tabindex="@(Model.Result.Page >= totalPages ? "-1" : "0")"
                    asp-route-query="@Model.Query" asp-route-productId="@Model.ProductId" asp-route-status="@Model.Status" asp-route-pageNumber="@(Model.Result.Page + 1)">下一页</a>
             </div>
         </nav>

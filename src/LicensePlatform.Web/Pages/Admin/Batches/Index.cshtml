@@ -7,68 +7,109 @@
 <div class="page-heading">
     <div>
         <h1>卡密批次</h1>
-        <p>卡密明文只在生成后的短时间内允许下载一次。</p>
+        <p>按批次生成和管理卡密，卡密明文仅提供一次性 CSV 下载。</p>
     </div>
     <a class="btn btn-primary" asp-page="Create">生成新批次</a>
 </div>
 
 <section class="panel">
-@if (Model.Batches.Count == 0)
-{
-    <div class="empty-state">尚未生成卡密批次。</div>
-}
-else
-{
-    <div class="table-responsive">
-        <table class="table">
-            <thead>
-            <tr>
-                <th>批次</th>
-                <th>产品</th>
-                <th>类型</th>
-                <th>数量</th>
-                <th>状态</th>
-                <th>UTC 创建时间</th>
-                <th class="text-end">操作</th>
-            </tr>
-            </thead>
-            <tbody>
-            @foreach (var batch in Model.Batches)
-            {
-                var validity = batch.ValidityKind switch
-                {
-                    LicensePlatform.Web.Services.AdminValidityKind.Day => $"{batch.DurationUnits} 天",
-                    LicensePlatform.Web.Services.AdminValidityKind.Month => $"{batch.DurationUnits} 月（每月 30 天）",
-                    LicensePlatform.Web.Services.AdminValidityKind.Year => $"{batch.DurationUnits} 年（每年 365 天）",
-                    _ => "永久"
-                };
-                <tr>
-                    <td><strong>@batch.Name</strong><div class="small text-muted mono">@batch.Id</div></td>
-                    <td>@batch.ProductName</td>
-                    <td>@validity</td>
-                    <td>@batch.GeneratedCount / @batch.RequestedCount</td>
-                    <td>@batch.Status</td>
-                    <td class="text-nowrap">@batch.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")</td>
-                    <td class="text-end text-nowrap">
-                        @if (batch.ExportAvailable)
-                        {
-                            <a class="btn btn-sm btn-primary" asp-page-handler="Export" asp-route-id="@batch.Id">一次性下载 CSV</a>
-                        }
-                        <button class="btn btn-sm btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#disable-@batch.Id">禁用整批</button>
-                    </td>
-                </tr>
-                <tr class="collapse" id="disable-@batch.Id">
-                    <td colspan="7">
-                        <form method="post" asp-page-handler="DisableAll" class="d-flex gap-2 justify-content-end">
-                            <input type="hidden" name="id" value="@batch.Id" />
-                            <input class="form-control form-control-sm" style="max-width: 420px" name="reason" maxlength="300" placeholder="填写批量禁用原因" required />
-                            <button class="btn btn-sm btn-danger" type="submit">确认禁用</button>
-                        </form>
-                    </td>
-                </tr>
-            }
-            </tbody>
-        </table>
+    <div class="panel-heading">
+        <div>
+            <h2 class="h5 mb-1">批次列表</h2>
+            <p class="cell-secondary mb-0">CSV 只能下载一次，生成 15 分钟后自动删除。请及时保存到安全位置。</p>
+        </div>
     </div>
-}
+    @if (Model.Batches.Count == 0)
+    {
+        <div class="empty-state">
+            <h3 class="h6">尚未生成卡密批次</h3>
+            <p>选择产品与有效期，生成第一批卡密。</p>
+            <a class="btn btn-primary" asp-page="Create">生成新批次</a>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive" role="region" aria-label="卡密批次列表，可横向滚动" tabindex="0">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th scope="col">批次</th>
+                    <th scope="col">产品</th>
+                    <th scope="col">类型</th>
+                    <th scope="col" class="numeric">已生成 / 计划数量</th>
+                    <th scope="col">状态</th>
+                    <th scope="col">创建时间（UTC）</th>
+                    <th scope="col" class="text-end">操作</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var batch in Model.Batches)
+                {
+                    var validity = batch.ValidityKind switch
+                    {
+                        LicensePlatform.Web.Services.AdminValidityKind.Day => $"{batch.DurationUnits} 天",
+                        LicensePlatform.Web.Services.AdminValidityKind.Month => $"{batch.DurationUnits} 月（每月 30 天）",
+                        LicensePlatform.Web.Services.AdminValidityKind.Year => $"{batch.DurationUnits} 年（每年 365 天）",
+                        _ => "永久"
+                    };
+                    var stateLabel = batch.Status switch
+                    {
+                        "DRAFT" => "草稿",
+                        "ISSUING" => "生成中",
+                        "ISSUED" => "已生成",
+                        "CANCELLED" => "已取消",
+                        _ => batch.Status
+                    };
+                    var stateBadge = batch.Status switch
+                    {
+                        "DRAFT" => "badge-unused",
+                        "ISSUING" => "badge-unused",
+                        "ISSUED" => "badge-enabled",
+                        "CANCELLED" => "badge-disabled",
+                        _ => "badge-neutral"
+                    };
+                    <tr>
+                        <td>
+                            <div class="cell-primary">@batch.Name</div>
+                            <div class="cell-secondary cell-id">@batch.Id</div>
+                        </td>
+                        <td>@batch.ProductName</td>
+                        <td>@validity</td>
+                        <td class="numeric">@batch.GeneratedCount / @batch.RequestedCount</td>
+                        <td><span class="badge-state @stateBadge">@stateLabel</span></td>
+                        <td class="table-time">@batch.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>
+                            <div class="table-actions justify-content-end">
+                                @if (batch.ExportAvailable)
+                                {
+                                    <a class="btn btn-sm btn-primary" asp-page-handler="Export" asp-route-id="@batch.Id">一次性下载 CSV</a>
+                                }
+                                <button class="btn btn-sm btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#disable-@batch.Id" aria-controls="disable-@batch.Id" aria-expanded="false">禁用整批</button>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="disable-@batch.Id">
+                        <td colspan="7">
+                            <div class="danger-panel">
+                                <h3 class="h6">确认禁用此批次的全部卡密</h3>
+                                <p class="small text-muted">请核对批次“@batch.Name”。此操作将禁用整批授权，请填写操作原因。</p>
+                                <form method="post" asp-page-handler="DisableAll">
+                                    <input type="hidden" name="id" value="@batch.Id" />
+                                    <div class="mb-3">
+                                        <label class="form-label" for="disable-reason-@batch.Id">批量禁用原因</label>
+                                        <input class="form-control form-control-sm reason-input" id="disable-reason-@batch.Id" name="reason" maxlength="300" placeholder="填写批量禁用原因" required />
+                                    </div>
+                                    <div class="table-actions">
+                                        <button class="btn btn-sm btn-danger" type="submit">确认禁用整批</button>
+                                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#disable-@batch.Id" aria-controls="disable-@batch.Id" aria-expanded="false">取消</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
 </section>

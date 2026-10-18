@@ -6,89 +6,105 @@
 
 <div class="page-heading">
     <div>
+        <div class="eyebrow">管理工作台</div>
         <h1>系统概览</h1>
-        <p>查看产品、授权、设备绑定和最近管理操作。</p>
+        <p>产品、卡密与设备绑定，一目了然。</p>
     </div>
-    <a class="btn btn-primary" asp-page="/Admin/Batches/Create">生成卡密</a>
-</div>
-
-<div class="row g-3 mb-4">
-    <div class="col-6 col-xl">
-        <div class="metric-card">
-            <div class="metric-label">产品</div>
-            <div class="metric-value">@Model.Snapshot.ProductCount</div>
-            <div class="metric-help">已创建的软件产品</div>
-        </div>
-    </div>
-    <div class="col-6 col-xl">
-        <div class="metric-card">
-            <div class="metric-label">未激活卡密</div>
-            <div class="metric-value">@Model.Snapshot.UnusedLicenseCount</div>
-            <div class="metric-help">有效期尚未开始</div>
-        </div>
-    </div>
-    <div class="col-6 col-xl">
-        <div class="metric-card">
-            <div class="metric-label">有效授权</div>
-            <div class="metric-value">@Model.Snapshot.ActiveLicenseCount</div>
-            <div class="metric-help">当前可用的授权</div>
-        </div>
-    </div>
-    <div class="col-6 col-xl">
-        <div class="metric-card">
-            <div class="metric-label">已过期</div>
-            <div class="metric-value">@Model.Snapshot.ExpiredLicenseCount</div>
-            <div class="metric-help">业务有效期已结束</div>
-        </div>
-    </div>
-    <div class="col-6 col-xl">
-        <div class="metric-card">
-            <div class="metric-label">活动设备</div>
-            <div class="metric-value">@Model.Snapshot.ActiveBindingCount</div>
-            <div class="metric-help">当前绑定设备数</div>
-        </div>
+    <div class="heading-actions">
+        <a class="btn btn-outline-secondary" asp-page="/Admin/Products/Edit">新建产品</a>
+        <a class="btn btn-primary" asp-page="/Admin/Batches/Create">生成卡密</a>
     </div>
 </div>
 
-<section class="panel">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-            <h2 class="h5 mb-1">最近操作</h2>
-            <p class="text-muted mb-0">仅显示脱敏后的管理员审计事件。</p>
-        </div>
-        <a asp-page="/Admin/Audit/Index">查看全部</a>
+<section class="metrics-grid" aria-label="授权统计">
+    <div class="metric-card" data-stat="products">
+        <div class="metric-label">产品</div>
+        <div class="metric-value">@Model.Snapshot.ProductCount</div>
+        <div class="metric-help">已创建的软件产品</div>
     </div>
-
-    @if (Model.Snapshot.RecentAuditEvents.Count == 0)
-    {
-        <div class="empty-state">尚无审计记录。</div>
-    }
-    else
-    {
-        <div class="table-responsive">
-            <table class="table align-middle">
-                <thead>
-                <tr>
-                    <th>UTC 时间</th>
-                    <th>操作</th>
-                    <th>对象</th>
-                    <th>结果</th>
-                    <th>摘要</th>
-                </tr>
-                </thead>
-                <tbody>
-                @foreach (var item in Model.Snapshot.RecentAuditEvents)
-                {
-                    <tr>
-                        <td class="text-nowrap">@item.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                        <td><span class="mono">@item.Action</span></td>
-                        <td>@item.TargetType</td>
-                        <td>@item.Result</td>
-                        <td>@(item.Summary ?? "-")</td>
-                    </tr>
-                }
-                </tbody>
-            </table>
-        </div>
-    }
+    <div class="metric-card" data-stat="unused">
+        <div class="metric-label">未激活卡密</div>
+        <div class="metric-value">@Model.Snapshot.UnusedLicenseCount</div>
+        <div class="metric-help">有效期尚未开始</div>
+    </div>
+    <div class="metric-card" data-stat="active">
+        <div class="metric-label">有效授权</div>
+        <div class="metric-value">@Model.Snapshot.ActiveLicenseCount</div>
+        <div class="metric-help">当前可用的授权</div>
+    </div>
+    <div class="metric-card" data-stat="expired">
+        <div class="metric-label">已过期</div>
+        <div class="metric-value">@Model.Snapshot.ExpiredLicenseCount</div>
+        <div class="metric-help">业务有效期已结束</div>
+    </div>
+    <div class="metric-card" data-stat="bindings">
+        <div class="metric-label">活动设备</div>
+        <div class="metric-value">@Model.Snapshot.ActiveBindingCount</div>
+        <div class="metric-help">当前绑定设备数</div>
+    </div>
 </section>
+
+<div class="dashboard-grid">
+    <section class="panel" aria-labelledby="recent-activity-title">
+        <div class="panel-heading">
+            <div>
+                <h2 id="recent-activity-title" class="mb-1">最近操作</h2>
+                <p class="mb-0">最近的管理员操作，仅展示脱敏审计信息。</p>
+            </div>
+            <a asp-page="/Admin/Audit/Index">全部日志 <span aria-hidden="true">→</span></a>
+        </div>
+        @if (Model.Snapshot.RecentAuditEvents.Count == 0)
+        {
+            <div class="empty-state">尚无审计记录。管理操作会在这里留下记录。</div>
+        }
+        else
+        {
+            <div class="table-responsive" role="region" aria-label="最近管理操作" tabindex="0">
+                <table class="table align-middle">
+                    <thead>
+                    <tr>
+                        <th scope="col">UTC 时间</th>
+                        <th scope="col">操作</th>
+                        <th scope="col">对象</th>
+                        <th scope="col">结果</th>
+                        <th scope="col">摘要</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var item in Model.Snapshot.RecentAuditEvents)
+                    {
+                        <tr>
+                            <td class="table-time">@item.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            <td class="cell-id"><span class="mono">@item.Action</span></td>
+                            <td>@item.TargetType</td>
+                            <td><span class="badge-state badge-neutral">@item.Result</span></td>
+                            <td class="cell-summary">@(item.Summary ?? "-")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+    <aside class="panel" aria-labelledby="quick-links-title">
+        <div class="panel-heading"><h2 id="quick-links-title" class="mb-0">常用入口</h2></div>
+        <div class="quick-links">
+            <a class="quick-link" asp-page="/Admin/Products/Index">
+                <span><strong>管理产品</strong><small>配置产品与客户端公钥</small></span>
+                <span class="quick-link-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="quick-link" asp-page="/Admin/Batches/Index">
+                <span><strong>卡密批次</strong><small>查看批次与导出状态</small></span>
+                <span class="quick-link-arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="quick-link" asp-page="/Admin/Licenses/Index">
+                <span><strong>查询授权</strong><small>查看有效期与设备绑定</small></span>
+                <span class="quick-link-arrow" aria-hidden="true">→</span>
+            </a>
+        </div>
+        <div class="notice-block">
+            <strong>关于授权有效期</strong>
+            <p>有限卡从首次成功激活开始计时。解绑设备不会重置总有效期。</p>
+        </div>
+    </aside>
+</div>

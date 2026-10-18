@@ -12,14 +12,17 @@
     <a class="btn btn-outline-secondary" asp-page="Index">返回批次</a>
 </div>
 
-<section class="panel" style="max-width: 820px">
+<section class="panel form-panel">
+    <div class="panel-heading">
+        <h2 class="h5 mb-0">批次信息</h2>
+    </div>
     <div class="alert alert-warning">
-        生成后的 CSV 只能下载一次，并在 15 分钟后自动删除。请立即保存到安全位置。
+        <strong>请妥善保存卡密文件。</strong>生成后的 CSV 只能下载一次，并在 15 分钟后自动删除。请立即保存到安全位置。
     </div>
     <form method="post">
         <div asp-validation-summary="ModelOnly" class="alert alert-danger"></div>
 
-        <div class="row g-3">
+        <div class="row g-4">
             <div class="col-md-7">
                 <label asp-for="Input.ProductId" class="form-label">产品</label>
                 <select asp-for="Input.ProductId" class="form-select">
@@ -42,7 +45,7 @@
                 <span asp-validation-for="Input.Name" class="text-danger"></span>
             </div>
             <div class="col-md-5">
-                <label asp-for="Input.ValidityKind" class="form-label">卡类型</label>
+                <label asp-for="Input.ValidityKind" for="validity-kind" class="form-label">卡类型</label>
                 <select asp-for="Input.ValidityKind" class="form-select" id="validity-kind">
                     <option value="Day">天卡</option>
                     <option value="Month">月卡（30 天）</option>
@@ -52,8 +55,8 @@
             </div>
             <div class="col-md-5" id="duration-units-row">
                 <label asp-for="Input.DurationUnits" class="form-label">时长数量</label>
-                <input asp-for="Input.DurationUnits" class="form-control" min="1" max="3650" />
-                <div class="form-text">例如 3 张月卡中的“3”应填在数量；三个月卡的“3”填在这里。</div>
+                <input asp-for="Input.DurationUnits" class="form-control" min="1" max="3650" aria-describedby="duration-units-help" />
+                <div class="form-text" id="duration-units-help">生成数量决定卡密张数；时长数量决定每张卡的有效期。例如三个月卡，此处填 3。</div>
                 <span asp-validation-for="Input.DurationUnits" class="text-danger"></span>
             </div>
             <div class="col-12">
@@ -62,9 +65,10 @@
             </div>
         </div>
 
-        <hr class="my-4" />
-        <button class="btn btn-primary" type="submit">生成并准备下载</button>
-        <a class="btn btn-link" asp-page="Index">取消</a>
+        <div class="form-actions">
+            <button class="btn btn-primary" type="submit">生成并准备下载</button>
+            <a class="btn btn-outline-secondary" asp-page="Index">取消</a>
+        </div>
     </form>
 </section>
 

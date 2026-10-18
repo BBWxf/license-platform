@@ -2,18 +2,32 @@
 @{
     var systemName = Configuration["Branding:SystemName"] ?? "软件授权管理系统";
     var insecureHttp = !Context.Request.IsHttps;
+    var authenticated = User.Identity?.IsAuthenticated == true;
+    var currentPage = ViewContext.RouteData.Values["page"]?.ToString() ?? "";
+    var navigation = new[]
+    {
+        (Page: "/Admin/Dashboard", Prefix: "/Admin/Dashboard", Label: "系统概览", Icon: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z"),
+        (Page: "/Admin/Products/Index", Prefix: "/Admin/Products/", Label: "产品管理", Icon: "M12 3 3 8l9 5 9-5-9-5Z M3 8v9l9 5 9-5V8 M12 13v9 M7.5 5.5l9 5"),
+        (Page: "/Admin/Batches/Index", Prefix: "/Admin/Batches/", Label: "卡密批次", Icon: "M15 7h3 M15 11h3 M15 15h3 M6 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z M2 7h5 M2 12h5 M2 17h5"),
+        (Page: "/Admin/Licenses/Index", Prefix: "/Admin/Licenses/", Label: "授权查询", Icon: "M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z M8 12l3 3 5-6"),
+        (Page: "/Admin/Audit/Index", Prefix: "/Admin/Audit/", Label: "审计日志", Icon: "M8 3h9l4 4v13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z M16 3v5h5 M11 12h6 M11 16h6 M3 8v9"),
+        (Page: "/Admin/Settings/Index", Prefix: "/Admin/Settings/", Label: "系统设置", Icon: "M4 7h8 M16 7h4 M4 17h4 M12 17h8 M12 4v6 M8 14v6")
+    };
+    var sectionName = navigation.FirstOrDefault(item => currentPage.StartsWith(item.Prefix, StringComparison.OrdinalIgnoreCase)).Label ?? "管理控制台";
 }
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
     <title>@ViewData["Title"] - @systemName</title>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/LicensePlatform.Web.styles.css" asp-append-version="true" />
 </head>
-<body>
+<body class="@(authenticated ? "admin-layout" : "public-layout")">
+<a class="skip-link" href="#main-content">跳到主要内容</a>
 @if (insecureHttp)
 {
     <div class="security-warning" role="alert">
@@ -21,65 +35,78 @@
         登录密码、会话和激活卡密可能被网络监听；请尽快使用 <code>licensectl enable-https</code> 切换 HTTPS。
     </div>
 }
-<header class="app-header">
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container-fluid app-shell">
+<div class="application-frame">
+    <header class="app-header">
+        <nav class="navbar navbar-expand-lg @(authenticated ? "navbar-dark" : "") app-navigation" aria-label="主导航">
             <a class="navbar-brand" asp-page="/Index">
-                <span class="brand-mark"><img src="/brand/logo" alt="" onerror="this.remove();this.parentElement.textContent='授'" /></span>
-                <span>@systemName</span>
+                <span class="brand-mark" aria-hidden="true">
+                    <span class="brand-fallback">授</span>
+                    <img src="/brand/logo" alt="" onerror="this.remove()" />
+                </span>
+                <span class="brand-name">@systemName<span class="brand-caption">授权管理控制台</span></span>
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#primaryNavigation"
-                    aria-controls="primaryNavigation" aria-expanded="false" aria-label="展开导航">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="primaryNavigation">
-                @if (User.Identity?.IsAuthenticated == true)
-                {
-                    <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Dashboard">概览</a></li>
-                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Products/Index">产品</a></li>
-                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Batches/Index">卡密批次</a></li>
-                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Licenses/Index">授权查询</a></li>
-                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Audit/Index">审计日志</a></li>
-                        <li class="nav-item"><a class="nav-link" asp-page="/Admin/Settings/Index">系统设置</a></li>
+            @if (authenticated)
+            {
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#primaryNavigation"
+                        aria-controls="primaryNavigation" aria-expanded="false" aria-label="展开或收起导航">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="primaryNavigation">
+                    <div class="navigation-label">工作空间</div>
+                    <ul class="navbar-nav">
+                        @foreach (var item in navigation)
+                        {
+                            var active = currentPage.StartsWith(item.Prefix, StringComparison.OrdinalIgnoreCase);
+                            <li class="nav-item">
+                                <a class="nav-link @(active ? "active" : "")" asp-page="@item.Page" aria-current="@(active ? "page" : null)">
+                                    <svg class="app-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="@item.Icon" /></svg>
+                                    <span>@item.Label</span>
+                                </a>
+                            </li>
+                        }
                     </ul>
-                    <div class="d-flex align-items-center gap-3 account-actions">
-                        <span>@User.Identity.Name</span>
+                    <div class="sidebar-note">
+                        <span class="sidebar-note-title">授权协议 v1</span>
+                        <span>产品 · 卡密 · 设备</span>
+                    </div>
+                    <div class="account-actions">
+                        <span class="account-avatar" aria-hidden="true">管</span>
+                        <div class="account-identity"><span class="account-role">管理员</span><span class="account-name">@(User.Identity?.Name)</span></div>
                         <form method="post" asp-page="/Account/Logout">
                             <button class="btn btn-sm btn-outline-light" type="submit">退出</button>
                         </form>
                     </div>
-                }
-                else
-                {
-                    <div class="ms-auto">
-                        <a class="btn btn-sm btn-outline-light" asp-page="/Account/Login">管理员登录</a>
-                    </div>
-                }
+                </div>
+            }
+        </nav>
+    </header>
+    <div class="workspace">
+        @if (authenticated)
+        {
+            <div class="workspace-bar">
+                <div class="workspace-location"><span>管理控制台</span><span class="breadcrumb-divider" aria-hidden="true">/</span><strong>@sectionName</strong></div>
+                <span class="workspace-time">时间基准 <span class="mono">UTC</span></span>
             </div>
-        </div>
-    </nav>
-</header>
-
-<main class="app-main app-shell" role="main">
-    @if (TempData["Success"] is string success)
-    {
-        <div class="alert alert-success" role="alert">@success</div>
-    }
-    @if (TempData["Error"] is string error)
-    {
-        <div class="alert alert-danger" role="alert">@error</div>
-    }
-    @RenderBody()
-</main>
-
-<footer class="app-footer">
-    <div class="app-shell d-flex flex-wrap justify-content-between gap-2">
-        <span>&copy; 2026 @systemName</span>
-        <span>授权协议 v1 · 服务端时间使用 UTC</span>
+        }
+        <main class="app-main app-shell" id="main-content" tabindex="-1">
+            @if (TempData["Success"] is string success)
+            {
+                <div class="alert alert-success" role="alert">@success</div>
+            }
+            @if (TempData["Error"] is string error)
+            {
+                <div class="alert alert-danger" role="alert">@error</div>
+            }
+            @RenderBody()
+        </main>
+        <footer class="app-footer">
+            <div class="app-shell footer-content">
+                <span>&copy; 2026 @systemName</span>
+                <span>授权协议 v1 · 服务端时间使用 UTC</span>
+            </div>
+        </footer>
     </div>
-</footer>
-
+</div>
 <script src="~/lib/jquery/dist/jquery.min.js"></script>
 <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
 <script src="~/js/site.js" asp-append-version="true"></script>

@@ -8,54 +8,80 @@
 <div class="page-heading">
     <div>
         <h1>审计日志</h1>
-        <p>记录登录、产品、发卡、禁用、延期和解绑等管理操作。</p>
+        <p>追溯登录、产品、发卡、禁用、延期和解绑等管理操作，所有时间均为 UTC。</p>
     </div>
 </div>
 
-<section class="panel mb-4">
+<section class="panel filter-panel mb-4">
+    <div class="panel-heading">
+        <h2 class="h5 mb-0">筛选事件</h2>
+    </div>
     <form method="get" class="row g-3 align-items-end">
         <div class="col-md-8">
             <label class="form-label" for="action">操作类型</label>
             <input class="form-control mono" id="action" name="action" value="@Model.ActionFilter" placeholder="例如 LICENSE.DISABLE；留空显示全部" />
         </div>
-        <div class="col-md-4">
+        <div class="col-md-4 filter-actions">
             <button class="btn btn-primary w-100" type="submit">筛选</button>
         </div>
     </form>
 </section>
 
 <section class="panel">
-@if (Model.Result.Items.Count == 0)
-{
-    <div class="empty-state">没有符合条件的审计事件。</div>
-}
-else
-{
-    <div class="table-responsive">
-        <table class="table">
-            <thead><tr><th>UTC 时间</th><th>操作者</th><th>操作</th><th>对象</th><th>结果</th><th>来源 IP</th><th>摘要</th></tr></thead>
-            <tbody>
-            @foreach (var item in Model.Result.Items)
-            {
-                <tr>
-                    <td class="text-nowrap">@item.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                    <td>@item.Actor</td>
-                    <td><code>@item.Action</code></td>
-                    <td>@item.TargetType @item.TargetId</td>
-                    <td>@item.Result</td>
-                    <td><code>@item.SourceIp</code></td>
-                    <td>@(item.Summary ?? "-")</td>
-                </tr>
-            }
-            </tbody>
-        </table>
+    <div class="panel-heading">
+        <h2 class="h5 mb-0">事件记录</h2>
     </div>
-    <nav class="d-flex justify-content-between align-items-center mt-3">
-        <span class="text-muted">共 @Model.Result.TotalCount 条，第 @Model.Result.Page / @totalPages 页</span>
-        <div class="btn-group">
-            <a class="btn btn-sm btn-outline-secondary @(Model.Result.Page <= 1 ? "disabled" : "")" asp-route-action="@Model.ActionFilter" asp-route-pageNumber="@(Model.Result.Page - 1)">上一页</a>
-            <a class="btn btn-sm btn-outline-secondary @(Model.Result.Page >= totalPages ? "disabled" : "")" asp-route-action="@Model.ActionFilter" asp-route-pageNumber="@(Model.Result.Page + 1)">下一页</a>
+    @if (Model.Result.Items.Count == 0)
+    {
+        <div class="empty-state">
+            <h3 class="h6">没有符合条件的审计事件</h3>
+            <p>请检查操作类型，或留空查看全部记录。</p>
         </div>
-    </nav>
-}
+    }
+    else
+    {
+        <div class="table-responsive" role="region" aria-label="审计事件记录，可横向滚动" tabindex="0">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th scope="col">时间（UTC）</th>
+                    <th scope="col">操作者</th>
+                    <th scope="col">操作</th>
+                    <th scope="col">对象</th>
+                    <th scope="col">结果</th>
+                    <th scope="col">来源 IP</th>
+                    <th scope="col">摘要</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var item in Model.Result.Items)
+                {
+                    <tr>
+                        <td class="table-time">@item.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td class="cell-id">@item.Actor</td>
+                        <td class="cell-id"><code>@item.Action</code></td>
+                        <td>
+                            <div class="cell-primary">@item.TargetType</div>
+                            <div class="cell-secondary cell-id">@item.TargetId</div>
+                        </td>
+                        <td><span class="badge-state badge-neutral">@item.Result</span></td>
+                        <td class="cell-id"><code>@item.SourceIp</code></td>
+                        <td class="cell-summary">@(item.Summary ?? "—")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+        <nav class="pagination-bar" aria-label="审计日志分页">
+            <span class="cell-secondary">共 @Model.Result.TotalCount 条，第 @Model.Result.Page / @totalPages 页</span>
+            <div class="btn-group">
+                <a class="btn btn-sm btn-outline-secondary @(Model.Result.Page <= 1 ? "disabled" : "")"
+                   aria-disabled="@(Model.Result.Page <= 1 ? "true" : "false")" tabindex="@(Model.Result.Page <= 1 ? "-1" : "0")"
+                   asp-route-action="@Model.ActionFilter" asp-route-pageNumber="@(Model.Result.Page - 1)">上一页</a>
+                <a class="btn btn-sm btn-outline-secondary @(Model.Result.Page >= totalPages ? "disabled" : "")"
+                   aria-disabled="@(Model.Result.Page >= totalPages ? "true" : "false")" tabindex="@(Model.Result.Page >= totalPages ? "-1" : "0")"
+                   asp-route-action="@Model.ActionFilter" asp-route-pageNumber="@(Model.Result.Page + 1)">下一页</a>
+            </div>
+        </nav>
+    }
 </section>
