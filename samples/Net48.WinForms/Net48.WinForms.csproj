@@ -8,6 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\SampleClientConfiguration.cs" Link="Shared\SampleClientConfiguration.cs" />
+    <Compile Include="..\Shared\SampleLicenseOperation.cs" Link="Shared\SampleLicenseOperation.cs" />
+    <Compile Include="..\Shared\SampleLicenseFeedback.cs" Link="Shared\SampleLicenseFeedback.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Licensing.Client.Windows\Licensing.Client.Windows.csproj" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>

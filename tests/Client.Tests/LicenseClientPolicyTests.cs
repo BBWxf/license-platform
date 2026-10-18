@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Licensing.Client;
 using Licensing.Client.Windows;
+using Licensing.Samples;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Xunit;
@@ -26,6 +27,54 @@ public sealed class LicenseClientPolicyTests
         Assert.NotNull(environment.StateStore.Record);
         Assert.DoesNotContain("license-A", JsonConvert.SerializeObject(environment.StateStore.Record));
         Assert.Equal(TestLicenseId.ToString("D"), result.Lease!.LicenseId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" \t\r\n")]
+    public async Task SampleButton_ImportedExportActivatesThenVerifiesWithoutReenteringKey(string? emptyInput)
+    {
+        using var environment = new TestEnvironment();
+        var path = Path.Combine(Path.GetTempPath(), "sample-public-config-" + Guid.NewGuid().ToString("N") + ".json");
+        var operation = new SampleLicenseOperation();
+        try
+        {
+            File.WriteAllText(path, environment.ExportPublicConfiguration());
+            var configuration = SampleClientConfiguration.LoadFile(path);
+            var options = configuration.CreateOptions(configuration.ServerBaseUrl, false);
+            environment.PayloadMutation = payload =>
+            {
+                payload["iss"] = options.ExpectedIssuer;
+                payload["aud"] = options.ExpectedAudience;
+            };
+            using var client = environment.CreateClient(options: options);
+
+            var initial = await operation.RunAsync(client, null).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(LicenseErrorCode.ActivationRequired, initial.Error?.Code);
+            Assert.Empty(environment.Handler.Requests);
+            Assert.Contains("尚未激活", SampleLicenseFeedback.Describe(initial));
+
+            var activated = await operation.RunAsync(client, "license-A").WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(activated.Success, activated.Error?.Code.ToString());
+            Assert.False(activated.UsedOfflineFallback);
+            Assert.Equal(2, environment.Handler.RequestCount);
+            Assert.Contains("本次离线租约期限", SampleLicenseFeedback.Describe(activated));
+            Assert.DoesNotContain("license-A", JsonConvert.SerializeObject(environment.StateStore.Record));
+
+            environment.Clock.UtcNow = environment.Clock.UtcNow.AddMinutes(20);
+            var verified = await operation.RunAsync(client, emptyInput).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(verified.Success, verified.Error?.Code.ToString());
+            Assert.False(verified.UsedOfflineFallback);
+            Assert.Equal(3, environment.Handler.RequestCount);
+            Assert.Equal("/api/v1/client/validations", environment.Handler.Requests.Last().PathAndQuery);
+            Assert.DoesNotContain("license-A", environment.Handler.Requests.Last().Body);
+        }
+        finally
+        {
+            await operation.CloseAsync(() => { }).WaitAsync(TimeSpan.FromSeconds(10));
+            File.Delete(path);
+        }
     }
 
     [Fact]
@@ -613,6 +662,20 @@ public sealed class LicenseClientPolicyTests
             LicenseClientOptions? options = null,
             ILicenseStateStore? stateStore = null) =>
             new(handler ?? Handler, options ?? CreateOptions(), FingerprintProvider, KeyStore, stateStore ?? StateStore, Clock);
+
+        internal string ExportPublicConfiguration() => JsonConvert.SerializeObject(new
+        {
+            protocolVersion = "1",
+            serverBaseUrl = "https://licensing.test",
+            productId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            productCode = "TEST-PRODUCT",
+            productName = "合成测试产品",
+            offlineLeaseMinutes = 360,
+            signingKeys = new[]
+            {
+                new { kid = "server-1", alg = "ES256", pem = _serverKey.ExportSubjectPublicKeyInfoPem(), status = "ACTIVE" }
+            }
+        });
 
         internal LicenseClientOptions CreateOptions()
         {

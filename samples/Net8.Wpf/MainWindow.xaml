@@ -1,24 +1,47 @@
 <Window x:Class="Net8.Wpf.Sample.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title=".NET 8 Licensing Sample" Height="230" Width="680"
-        WindowStartupLocation="CenterScreen">
+        Title=".NET 8 卡密授权示例" Height="560" Width="860"
+        MinHeight="520" MinWidth="760" WindowStartupLocation="CenterScreen">
     <Grid Margin="20">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="110" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <TextBlock Text="License key" Margin="0,5,12,0" VerticalAlignment="Top" />
-        <PasswordBox x:Name="LicenseKey" Grid.Column="1" MinWidth="420" Padding="6" />
-        <Button x:Name="VerifyButton" Grid.Row="1" Grid.Column="1" Margin="0,12,0,0"
-                HorizontalAlignment="Left" Padding="14,7" Content="Activate / Verify" Click="VerifyButton_Click" />
-        <TextBlock x:Name="Status" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,18,0,0"
-                   Text="Enter a license key." TextWrapping="Wrap" />
+        <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,12">
+            <Button x:Name="ImportButton" Content="导入客户端配置…" Padding="12,6" Click="ImportConfiguration_Click" />
+            <Button x:Name="ApplyButton" Content="应用配置" Padding="12,6" Margin="10,0,0,0" Click="ApplyConfiguration_Click" />
+        </StackPanel>
+        <TextBlock Grid.Row="1" Text="配置来源" VerticalAlignment="Center" />
+        <TextBox x:Name="ConfigurationSource" Grid.Row="1" Grid.Column="1" IsReadOnly="True" Margin="0,0,0,8" />
+        <TextBlock Grid.Row="2" Text="产品公开编号" VerticalAlignment="Center" />
+        <TextBox x:Name="ProductCode" Grid.Row="2" Grid.Column="1" IsReadOnly="True" Margin="0,0,0,8" />
+        <TextBlock Grid.Row="3" Text="服务根地址" VerticalAlignment="Center" />
+        <TextBox x:Name="ServerUrl" Grid.Row="3" Grid.Column="1" Margin="0,0,0,8" TextChanged="ConfigurationChanged" />
+        <CheckBox x:Name="AllowHttp" Grid.Row="4" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                  Content="仅受控联调：显式允许明文 HTTP（不安全）"
+                  Checked="ConfigurationChanged" Unchecked="ConfigurationChanged" />
+        <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,0,0,12" Foreground="DarkRed" TextWrapping="Wrap"
+                   Text="正式使用必须 HTTPS。HTTP 会暴露卡密和授权数据，只能在已认证 VPN / 受控隧道内联调；勾选不会提供加密保护。" />
+        <TextBlock Grid.Row="6" Text="首次激活卡密" VerticalAlignment="Center" />
+        <PasswordBox x:Name="LicenseKey" Grid.Row="6" Grid.Column="1" Padding="6" />
+        <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,12,0,12">
+            <Button x:Name="VerifyButton" Content="激活 / 验证" Padding="14,7" Click="VerifyButton_Click" />
+            <Button x:Name="CancelButton" Content="取消请求" Padding="14,7" Margin="10,0,0,0" Click="CancelButton_Click" />
+        </StackPanel>
+        <TextBox x:Name="Status" Grid.Row="8" Grid.ColumnSpan="2" IsReadOnly="True"
+                 TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="8" />
     </Grid>
 </Window>

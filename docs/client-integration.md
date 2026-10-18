@@ -17,6 +17,23 @@
 
 发布应用时要把 SDK 版本、产品代码、预期 issuer/audience 和产品 ES256 公钥集合一并冻结。客户端不得通过未经认证的 HTTP 动态替换公钥。
 
+### 先运行 WinForms / WPF 示例
+
+两个桌面示例可以直接导入**现有后台下载的客户端 JSON 配置**，无需手动把 PEM 公钥改成 JWK，也无需重新部署后台。详细启动路径见 [示例说明](../samples/README.md)。
+
+1. 在后台创建产品，下载该产品的“客户端配置”；`productCode` 是产品公开编号，不是内部 UUID。
+2. 在该产品下生成一张测试卡密，妥善保存一次性导出的卡密；不要把卡密 CSV 当成客户端配置导入。
+3. 打开示例，点击“导入客户端配置…”，选择可信渠道取得的 JSON。
+4. 核对产品公开编号与服务根地址。若文件中仍是 `http://SERVER_IP`，在窗口内改成真实根地址（不要加 `/Admin`、`/api` 或查询参数），再点击“应用配置”。
+5. 未激活时会提示输入卡密。在密码框输入测试卡密，点击“激活 / 验证”；点击后会立即显示进度，结束后显示中文结果和错误码。
+6. 激活后输入框会清空。后续**留空点击“激活 / 验证”**即可在线优先验证已有激活状态，不需要重复输入卡密。
+
+HTTP 默认禁止，配置文件不能自行开启。仅在已认证 VPN / 受控隧道内联调时，才可另外勾选窗口内的明文 HTTP 风险确认；它不提供加密，不适用于公网正式使用。两个示例保持系统 HTTPS 证书链/主机名检查，不提供跳过证书验证。
+
+配置优先级为：窗口显式导入 > EXE 所在目录的 `client-config.json` > 完整旧公开环境变量。旧变量为 `LICENSING_BASE_URL`、`LICENSING_PRODUCT_CODE`、`LICENSING_SERVER_JWK`（单 JWK 或 JWKS），可选 `LICENSING_ISSUER` / `LICENSING_AUDIENCE`。不会跨来源补字段，默认文件损坏时也不会静默回退；窗口会显示错误，允许重新导入。GUI 不读取 `LICENSE_KEY` 或环境中的 HTTP 风险许可。卡密仅通过密码框输入，不放入配置、命令行或环境变量。
+
+示例共享适配层位于 `samples/Shared/`：保留原 `kid`，将后台的规范 P-256 PUBLIC KEY PEM 转为 SDK 的 JWK，保留 ACTIVE/RETIRED 公钥、排除 REVOKED；导出文件里的 `offlineLeaseMinutes` 不会自动改变 SDK 的六小时上限或刷新默认值。它只是本地导入入口，不是在线公钥发现或自动信任更新；公钥仍须来自可信渠道。核心 SDK 的 `ServerJwk.ParseMany()` 仍只接受 JWK/JWKS，不能直接传入后台整份 JSON 或 PEM。
+
 ## 3. 客户端配置最小集
 
 `LicenseClientOptions` 的关键配置：

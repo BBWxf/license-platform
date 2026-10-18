@@ -18,6 +18,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\samples\Shared\SampleClientConfiguration.cs" Link="Shared\SampleClientConfiguration.cs" />
+    <Compile Include="..\..\samples\Shared\SampleLicenseOperation.cs" Link="Shared\SampleLicenseOperation.cs" />
+    <Compile Include="..\..\samples\Shared\SampleLicenseFeedback.cs" Link="Shared\SampleLicenseFeedback.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Licensing.Client\Licensing.Client.csproj" />
     <ProjectReference Include="..\..\src\Licensing.Client.Windows\Licensing.Client.Windows.csproj" />
   </ItemGroup>
