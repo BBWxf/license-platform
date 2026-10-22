@@ -7,7 +7,7 @@
 <div class="page-heading">
     <div>
         <h1>卡密批次</h1>
-        <p>按批次生成和管理卡密，卡密明文仅提供一次性 CSV 下载。</p>
+        <p>按批次生成和管理卡密，可随时导出已保留的原始卡密 CSV。</p>
     </div>
     <a class="btn btn-primary" asp-page="Create">生成新批次</a>
 </div>
@@ -16,7 +16,7 @@
     <div class="panel-heading">
         <div>
             <h2 class="h5 mb-1">批次列表</h2>
-            <p class="cell-secondary mb-0">CSV 只能下载一次，生成 15 分钟后自动删除。请及时保存到安全位置。</p>
+            <p class="cell-secondary mb-0">卡密 CSV 加密保留，可重复导出；本地文件丢失后可重新下载。旧版已清除的导出数据无法还原，请仍做好安全备份。</p>
         </div>
     </div>
     @if (Model.Batches.Count == 0)
@@ -82,7 +82,11 @@
                             <div class="table-actions justify-content-end">
                                 @if (batch.ExportAvailable)
                                 {
-                                    <a class="btn btn-sm btn-primary" asp-page-handler="Export" asp-route-id="@batch.Id">一次性下载 CSV</a>
+                                    <a class="btn btn-sm btn-primary" asp-page-handler="Export" asp-route-id="@batch.Id">导出卡密</a>
+                                }
+                                else
+                                {
+                                    <span class="cell-secondary">无可用导出数据</span>
                                 }
                                 <button class="btn btn-sm btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#disable-@batch.Id" aria-controls="disable-@batch.Id" aria-expanded="false">禁用整批</button>
                             </div>

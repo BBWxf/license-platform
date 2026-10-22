@@ -39,7 +39,7 @@ public sealed class AdminPageTestHost : IAsyncDisposable
     private readonly IHost _host;
     private readonly bool _loopback;
 
-    private AdminPageTestHost(AdminPageDataState state, bool loopback)
+    private AdminPageTestHost(AdminPageDataState state, bool loopback, ILicenseBatchAdminService? batchService)
     {
         _loopback = loopback;
         Data = new AdminPageFixtureData(state);
@@ -107,7 +107,7 @@ public sealed class AdminPageTestHost : IAsyncDisposable
                     }).AddApplicationPart(webAssembly);
                     services.AddSingleton<IAdminDashboardQuery>(Data);
                     services.AddSingleton<IProductAdminService>(Data);
-                    services.AddSingleton<ILicenseBatchAdminService>(Data);
+                    services.AddSingleton<ILicenseBatchAdminService>(batchService ?? Data);
                     services.AddSingleton<ILicenseAdminService>(Data);
                     services.AddSingleton<IAuditAdminService>(Data);
                     services.AddSingleton<ISystemSettingsService>(Data);
@@ -153,9 +153,10 @@ public sealed class AdminPageTestHost : IAsyncDisposable
     public Uri BrowserSignInUri => new(BaseUri, SignInPath);
 
     public static async Task<AdminPageTestHost> StartAsync(
-        AdminPageDataState state = AdminPageDataState.Populated, bool loopback = false)
+        AdminPageDataState state = AdminPageDataState.Populated, bool loopback = false,
+        ILicenseBatchAdminService? batchService = null)
     {
-        var fixture = new AdminPageTestHost(state, loopback);
+        var fixture = new AdminPageTestHost(state, loopback, batchService);
         try
         {
             await fixture._host.StartAsync();
@@ -216,6 +217,17 @@ public sealed class AdminPageTestHost : IAsyncDisposable
         var cookie = await IssueCookieAsync();
         Client.DefaultRequestHeaders.Remove("Cookie");
         Client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", cookie);
+    }
+
+    // Change only the isolated credential store, exercising the production cookie-stamp validator.
+    // Existing encrypted tickets remain in memory and are rejected on their next request.
+    public async Task RevokeAdministratorCookieAsync()
+    {
+        await using var scope = _host.Services.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<LicensePlatformDbContext>();
+        var administrator = await database.Administrators.SingleAsync(item => item.Id == AdministratorId);
+        administrator.ChangePassword("admin-page-fixture-revoked-not-a-password-hash", AdminPageFixtureData.Timestamp.AddMinutes(1));
+        await database.SaveChangesAsync();
     }
 
     private static string FindContentRoot(string staticAssetsManifest)

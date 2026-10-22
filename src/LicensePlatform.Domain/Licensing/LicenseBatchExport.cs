@@ -14,7 +14,7 @@ public sealed class LicenseBatchExport : Entity
         byte[] downloadTokenHash,
         byte[] protectedPayload,
         DateTimeOffset createdAtUtc,
-        DateTimeOffset expiresAtUtc)
+        DateTimeOffset? expiresAtUtc)
         : base(id)
     {
         if (batchId == Guid.Empty)
@@ -23,8 +23,10 @@ public sealed class LicenseBatchExport : Entity
         }
 
         CreatedAtUtc = Guard.Utc(createdAtUtc, nameof(createdAtUtc));
-        ExpiresAtUtc = Guard.Utc(expiresAtUtc, nameof(expiresAtUtc));
-        if (ExpiresAtUtc <= CreatedAtUtc)
+        ExpiresAtUtc = expiresAtUtc.HasValue
+            ? Guard.Utc(expiresAtUtc.Value, nameof(expiresAtUtc))
+            : null;
+        if (ExpiresAtUtc.HasValue && ExpiresAtUtc.Value <= CreatedAtUtc)
         {
             throw new DomainException("Export expiration must be after its creation time.");
         }
@@ -44,7 +46,7 @@ public sealed class LicenseBatchExport : Entity
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
-    public DateTimeOffset ExpiresAtUtc { get; private set; }
+    public DateTimeOffset? ExpiresAtUtc { get; private set; }
 
     public DateTimeOffset? ConsumedAtUtc { get; private set; }
 
@@ -52,6 +54,11 @@ public sealed class LicenseBatchExport : Entity
 
     public void Consume(DateTimeOffset nowUtc)
     {
+        if (!ExpiresAtUtc.HasValue)
+        {
+            throw new DomainException("A durable export cannot be consumed.");
+        }
+
         nowUtc = Guard.Utc(nowUtc, nameof(nowUtc));
 
         if (ConsumedAtUtc.HasValue)
@@ -59,7 +66,7 @@ public sealed class LicenseBatchExport : Entity
             throw new DomainException("This export has already been consumed.");
         }
 
-        if (nowUtc >= ExpiresAtUtc)
+        if (nowUtc >= ExpiresAtUtc.Value)
         {
             throw new DomainException("This export has expired.");
         }
@@ -70,6 +77,11 @@ public sealed class LicenseBatchExport : Entity
 
     public void ErasePayload()
     {
+        if (!ExpiresAtUtc.HasValue)
+        {
+            throw new DomainException("A durable export payload cannot be erased.");
+        }
+
         if (!ConsumedAtUtc.HasValue)
         {
             throw new DomainException("An unconsumed export payload cannot be erased.");

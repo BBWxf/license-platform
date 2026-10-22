@@ -456,7 +456,7 @@ namespace LicensePlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("bytea")
                         .HasColumnName("download_token_hash");
 
-                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                    b.Property<DateTimeOffset?>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at_utc");
 
@@ -486,7 +486,7 @@ namespace LicensePlatform.Infrastructure.Persistence.Migrations
 
                     b.ToTable("license_batch_exports", null, t =>
                         {
-                            t.HasCheckConstraint("ck_license_batch_exports_expiration", "\"expires_at_utc\" > \"created_at_utc\"");
+                            t.HasCheckConstraint("ck_license_batch_exports_expiration", "\"expires_at_utc\" IS NULL OR \"expires_at_utc\" > \"created_at_utc\"");
 
                             t.HasCheckConstraint("ck_license_batch_exports_token_hash", "octet_length(\"download_token_hash\") = 32");
                         });

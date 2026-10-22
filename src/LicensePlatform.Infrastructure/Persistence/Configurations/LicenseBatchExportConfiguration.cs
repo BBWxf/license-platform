@@ -11,7 +11,7 @@ internal sealed class LicenseBatchExportConfiguration : IEntityTypeConfiguration
         builder.ToTable("license_batch_exports", table =>
         {
             table.HasCheckConstraint("ck_license_batch_exports_token_hash", "octet_length(\"download_token_hash\") = 32");
-            table.HasCheckConstraint("ck_license_batch_exports_expiration", "\"expires_at_utc\" > \"created_at_utc\"");
+            table.HasCheckConstraint("ck_license_batch_exports_expiration", "\"expires_at_utc\" IS NULL OR \"expires_at_utc\" > \"created_at_utc\"");
         });
         builder.HasKey(export => export.Id).HasName("pk_license_batch_exports");
         builder.Property(export => export.Id).HasColumnName("id").ValueGeneratedNever();
@@ -19,7 +19,7 @@ internal sealed class LicenseBatchExportConfiguration : IEntityTypeConfiguration
         builder.Property(export => export.DownloadTokenHash).HasColumnName("download_token_hash").IsRequired();
         builder.Property(export => export.ProtectedPayload).HasColumnName("protected_payload").IsRequired();
         builder.Property(export => export.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
-        builder.Property(export => export.ExpiresAtUtc).HasColumnName("expires_at_utc").IsRequired();
+        builder.Property(export => export.ExpiresAtUtc).HasColumnName("expires_at_utc");
         builder.Property(export => export.ConsumedAtUtc).HasColumnName("consumed_at_utc");
         builder.Property(export => export.Version)
             .HasColumnName("version")

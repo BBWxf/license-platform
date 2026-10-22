@@ -8,6 +8,7 @@ using LicensePlatform.Application.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace LicensePlatform.IntegrationTests;
 
@@ -66,6 +67,43 @@ public sealed class PersistenceModelTests
     }
 
     [Fact]
+    public void BatchExport_NullExpirationIsExplicitAndExistingPersistenceSemanticsArePreserved()
+    {
+        using var context = CreateContext();
+        var entityType = context.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(LicenseBatchExport))!;
+        var expiration = entityType.FindProperty(nameof(LicenseBatchExport.ExpiresAtUtc))!;
+
+        Assert.True(expiration.IsNullable);
+        Assert.Equal(typeof(DateTimeOffset?), expiration.ClrType);
+        Assert.Equal("expires_at_utc", expiration.GetColumnName());
+        Assert.Null(expiration.GetDefaultValueSql());
+        Assert.Null(expiration.GetDefaultValue());
+        Assert.Equal("license_batch_exports", entityType.GetTableName());
+        Assert.Equal(
+            "\"expires_at_utc\" IS NULL OR \"expires_at_utc\" > \"created_at_utc\"",
+            entityType.GetCheckConstraints().Single(check => check.Name == "ck_license_batch_exports_expiration").Sql);
+        Assert.Equal(
+            "octet_length(\"download_token_hash\") = 32",
+            entityType.GetCheckConstraints().Single(check => check.Name == "ck_license_batch_exports_token_hash").Sql);
+        Assert.False(entityType.FindProperty(nameof(LicenseBatchExport.DownloadTokenHash))!.IsNullable);
+        Assert.False(entityType.FindProperty(nameof(LicenseBatchExport.ProtectedPayload))!.IsNullable);
+        Assert.Equal("bytea", entityType.FindProperty(nameof(LicenseBatchExport.DownloadTokenHash))!.GetColumnType());
+        Assert.Equal("bytea", entityType.FindProperty(nameof(LicenseBatchExport.ProtectedPayload))!.GetColumnType());
+        Assert.True(entityType.FindProperty(nameof(LicenseBatchExport.ConsumedAtUtc))!.IsNullable);
+        var availabilityIndex = entityType.GetIndexes()
+            .Single(index => index.GetDatabaseName() == "ix_license_batch_exports_availability");
+        Assert.Equal(
+            new[] { nameof(LicenseBatchExport.ConsumedAtUtc), nameof(LicenseBatchExport.ExpiresAtUtc) },
+            availabilityIndex.Properties.Select(property => property.Name));
+        Assert.False(availabilityIndex.IsUnique);
+        var batchRelationship = Assert.Single(entityType.GetForeignKeys());
+        Assert.True(batchRelationship.IsUnique);
+        Assert.True(batchRelationship.IsRequired);
+        Assert.Equal(DeleteBehavior.Cascade, batchRelationship.DeleteBehavior);
+        Assert.Equal("fk_license_batch_exports_batches", batchRelationship.GetConstraintName());
+    }
+
+    [Fact]
     public void PostgreSqlCreateScript_CanBeGeneratedForTheCompleteModel()
     {
         using var context = CreateContext();
@@ -89,6 +127,7 @@ public sealed class PersistenceModelTests
         using var context = CreateContext();
 
         Assert.Contains("20260911151418_InitialCreate", context.Database.GetMigrations());
+        Assert.Contains("20261022000000_PersistLicenseBatchExports", context.Database.GetMigrations());
         Assert.False(context.Database.HasPendingModelChanges());
         var script = context.GetService<IMigrator>().GenerateScript(options: MigrationsSqlGenerationOptions.Idempotent);
         Assert.Contains("__EFMigrationsHistory", script);

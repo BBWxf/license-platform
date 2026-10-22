@@ -18,11 +18,8 @@ public sealed class LicenseBatchAdminService(
     ILookupHashService lookupHashService,
     IHttpContextAccessor httpContextAccessor) : ILicenseBatchAdminService
 {
-    private static readonly TimeSpan ExportLifetime = TimeSpan.FromMinutes(15);
-
     public async Task<IReadOnlyList<BatchListItem>> ListAsync(CancellationToken cancellationToken)
     {
-        var now = clock.UtcNow;
         return await dbContext.LicenseBatches
             .AsNoTracking()
             .OrderByDescending(item => item.CreatedAtUtc)
@@ -37,8 +34,7 @@ public sealed class LicenseBatchAdminService(
                 item.Status.ToString().ToUpperInvariant(),
                 dbContext.LicenseBatchExports.Any(export =>
                     export.BatchId == item.Id
-                    && export.ConsumedAtUtc == null
-                    && export.ExpiresAtUtc > now),
+                    && export.ProtectedPayload.Length > 0),
                 item.CreatedAtUtc))
             .ToListAsync(cancellationToken);
     }
@@ -104,7 +100,7 @@ public sealed class LicenseBatchAdminService(
                 lookupHashService.ComputeExportTokenHash(token),
                 protectedDataService.Protect(plaintext, ExportPurpose(batch.Id)),
                 now,
-                now.Add(ExportLifetime)));
+                expiresAtUtc: null));
         }
         finally
         {
@@ -130,23 +126,45 @@ public sealed class LicenseBatchAdminService(
         CancellationToken cancellationToken)
     {
         var export = await dbContext.LicenseBatchExports
-            .Include(item => item.Batch)
+            .AsNoTracking()
             .SingleOrDefaultAsync(item => item.BatchId == batchId, cancellationToken);
-        var now = clock.UtcNow;
-        if (export is null || export.IsConsumed || export.ExpiresAtUtc <= now)
+        if (export is null || export.ProtectedPayload.Length == 0)
         {
             return null;
         }
 
-        var plaintext = protectedDataService.Unprotect(export.ProtectedPayload, ExportPurpose(batchId));
-        export.Consume(now);
-        export.ErasePayload();
-        AddAudit(actorId, "BATCH.EXPORT_DOWNLOAD", "LicenseBatch", batchId, sourceIp, now, new { once = true });
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return new BatchExportDownload(
-            $"license-batch-{batchId:N}.csv",
-            plaintext,
-            "text/csv; charset=utf-8");
+        byte[] plaintext;
+        try
+        {
+            plaintext = protectedDataService.Unprotect(export.ProtectedPayload, ExportPurpose(batchId));
+        }
+        catch (CryptographicException)
+        {
+            return null;
+        }
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (plaintext.Length == 0)
+            {
+                return null;
+            }
+
+            AddAudit(actorId, "BATCH.EXPORT_DOWNLOAD", "LicenseBatch", batchId, sourceIp, clock.UtcNow,
+                new { repeatable = true });
+            await dbContext.SaveChangesAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return new BatchExportDownload(
+                $"license-batch-{batchId:N}.csv",
+                plaintext,
+                "text/csv; charset=utf-8");
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+            throw;
+        }
     }
 
     public async Task DisableAllAsync(

@@ -41,7 +41,7 @@ public sealed class CreateModel(ILicenseBatchAdminService batchService) : PageMo
             HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             cancellationToken);
 
-        TempData["Success"] = "卡密已生成，请在 15 分钟内完成一次性 CSV 下载。";
+        TempData["Success"] = "卡密已生成，可在批次列表点击“导出卡密”重复下载 CSV。请妥善保管文件。";
         return RedirectToPage("Index", new { id });
     }
 
