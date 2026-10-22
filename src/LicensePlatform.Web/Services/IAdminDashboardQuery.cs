@@ -18,4 +18,7 @@ public sealed record RecentAuditItem(
     string Action,
     string TargetType,
     string Result,
-    string? Summary);
+    string? Summary)
+{
+    public AuditPresentation? Presentation { get; init; }
+}

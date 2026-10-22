@@ -19,4 +19,7 @@ public sealed record AuditListItem(
     string? TargetId,
     string Result,
     string SourceIp,
-    string? Summary);
+    string? Summary)
+{
+    public AuditPresentation? Presentation { get; init; }
+}

@@ -47,7 +47,11 @@ public sealed class AuditAdminService(LicensePlatformDbContext dbContext) : IAud
             item.EntityId,
             "RECORDED",
             item.IpAddress ?? "-",
-            item.DataJson.Length > 220 ? item.DataJson.Substring(0, 220) + "…" : item.DataJson)).ToList();
+            item.DataJson.Length > 220 ? item.DataJson.Substring(0, 220) + "…" : item.DataJson)
+        {
+            Presentation = AuditPresentationFormatter.Format(
+                item.Action, item.EntityType, item.DataJson, item.ActorType, item.ActorId, item.EntityId)
+        }).ToList();
 
         return new AuditSearchResult(items, page, pageSize, total);
     }

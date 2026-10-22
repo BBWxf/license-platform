@@ -49,36 +49,54 @@
         <div class="panel-heading">
             <div>
                 <h2 id="recent-activity-title" class="mb-1">最近操作</h2>
-                <p class="mb-0">最近的管理员操作，仅展示脱敏审计信息。</p>
+                <p class="mb-0">包含管理员、授权客户端和系统事件。时间均为 UTC；“已记录”不代表操作成功。</p>
             </div>
             <a asp-page="/Admin/Audit/Index">全部日志 <span aria-hidden="true">→</span></a>
         </div>
         @if (Model.Snapshot.RecentAuditEvents.Count == 0)
         {
-            <div class="empty-state">尚无审计记录。管理操作会在这里留下记录。</div>
+            <div class="empty-state">尚无审计记录。管理员、授权客户端和系统的事件会在这里展示。</div>
         }
         else
         {
-            <div class="table-responsive" role="region" aria-label="最近管理操作" tabindex="0">
-                <table class="table align-middle">
+            <div class="table-responsive audit-table-scroll" role="region" aria-label="最近操作记录，可横向滚动" tabindex="0">
+                <table class="table audit-table">
                     <thead>
                     <tr>
-                        <th scope="col">UTC 时间</th>
-                        <th scope="col">操作</th>
+                        <th scope="col">时间（UTC）</th>
+                        <th scope="col">操作与说明</th>
                         <th scope="col">对象</th>
-                        <th scope="col">结果</th>
-                        <th scope="col">摘要</th>
+                        <th scope="col">记录详情</th>
                     </tr>
                     </thead>
                     <tbody>
                     @foreach (var item in Model.Snapshot.RecentAuditEvents)
                     {
+                        var presentation = LicensePlatform.Web.Services.AuditPresentationFormatter.For(item);
                         <tr>
-                            <td class="table-time">@item.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                            <td class="cell-id"><span class="mono">@item.Action</span></td>
-                            <td>@item.TargetType</td>
-                            <td><span class="badge-state badge-neutral">@item.Result</span></td>
-                            <td class="cell-summary">@(item.Summary ?? "-")</td>
+                            <td class="table-time"><time datetime="@(item.CreatedAt.ToUniversalTime().ToString("O"))">@item.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</time></td>
+                            <td class="audit-operation">
+                                <div class="cell-primary">@presentation.ActionLabel</div>
+                                <div class="cell-secondary audit-description">@presentation.Description</div>
+                            </td>
+                            <td class="audit-target">@presentation.TargetLabel</td>
+                            <td class="audit-record">
+                                <span class="badge-state badge-neutral">已记录</span>
+                                <details class="audit-details">
+                                    <summary>查看详情<span class="visually-hidden">：@presentation.ActionLabel</span></summary>
+                                    <dl class="audit-detail-list">
+                                        <dt>操作代码</dt>
+                                        <dd><code>@item.Action</code></dd>
+                                        <dt>对象类型代码</dt>
+                                        <dd><code>@item.TargetType</code></dd>
+                                        @foreach (var detail in presentation.Details)
+                                        {
+                                            <dt>@detail.Label</dt>
+                                            <dd>@detail.Value</dd>
+                                        }
+                                    </dl>
+                                </details>
+                            </td>
                         </tr>
                     }
                     </tbody>

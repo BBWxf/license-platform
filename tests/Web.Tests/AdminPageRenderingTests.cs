@@ -390,7 +390,7 @@ public sealed class AdminPageRenderingTests
         var text = PlainText(html);
         string? expected = path switch
         {
-            "/Admin/Dashboard" or "/Admin/Audit" => host.Data.Summary,
+            "/Admin/Dashboard" or "/Admin/Audit" => "其他操作",
             "/Admin/Products" or "/Admin/Batches/Create" or "/Admin/Licenses" => host.Data.ProductName,
             "/Admin/Batches" => host.Data.BatchName,
             "/Admin/Settings" => "instance-fixture-local",
@@ -412,8 +412,8 @@ public sealed class AdminPageRenderingTests
     private static bool IsDataTablePage(string path) => path is "/Admin/Dashboard" or "/Admin/Products" or "/Admin/Batches"
         or "/Admin/Licenses" or "/Admin/Audit" || path == LicenseDetails;
 
-    private static bool HasLongFixtureContent(string path) => path is "/Admin/Dashboard" or "/Admin/Products" or "/Admin/Batches"
-        or "/Admin/Batches/Create" or "/Admin/Licenses" or "/Admin/Audit" || path == ProductEdit || path == LicenseDetails;
+    private static bool HasLongFixtureContent(string path) => path is "/Admin/Products" or "/Admin/Batches"
+        or "/Admin/Batches/Create" or "/Admin/Licenses" || path == ProductEdit || path == LicenseDetails;
 
     private static void AssertSecurityHeaders(HttpResponseMessage response)
     {

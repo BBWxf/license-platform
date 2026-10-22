@@ -1,5 +1,6 @@
 using System.Data;
 using System.Linq.Expressions;
+using System.Text.Json;
 using LicensePlatform.Domain.Auditing;
 using LicensePlatform.Infrastructure.Persistence;
 using LicensePlatform.Web.Services;
@@ -177,6 +178,51 @@ public sealed class AdminAuditQueryTests
     }
 
     [Fact]
+    public async Task Services_present_fields_after_220_characters_without_changing_raw_summary_limits_or_tracking()
+    {
+        var clock = new TestClock();
+        var dataJson = JsonSerializer.Serialize(new
+        {
+            padding = new string('x', 260),
+            Count = 37,
+            validity = "Month",
+            DurationUnits = 2
+        });
+        Assert.True(dataJson.IndexOf("\"Count\"", StringComparison.Ordinal) > 220,
+            "The useful fields must be beyond both legacy summary limits.");
+        var record = new AuditRecord(Guid.NewGuid(), AuditActorType.Administrator, "test-actor-full-json",
+            "BATCH.CREATE", "LicenseBatch", "test-batch-full-json", dataJson, null, "192.0.2.10", clock.UtcNow);
+        await using var database = CreateDatabase();
+        await SeedAsync(database, [record]);
+
+        var snapshot = await new AdminDashboardQuery(database, clock).GetAsync(CancellationToken.None);
+        var result = await new AuditAdminService(database).SearchAsync(1, 10, null, CancellationToken.None);
+
+        var recent = Assert.Single(snapshot.RecentAuditEvents);
+        var item = Assert.Single(result.Items);
+        AssertAuditItem(record, item);
+        Assert.True(recent.Summary == dataJson[..160] + "…" && item.Summary == dataJson[..220] + "…",
+            "The original raw dashboard/audit summaries must retain their separate 160/220-character contracts.");
+        var recentPresentation = Assert.IsType<AuditPresentation>(recent.Presentation);
+        var auditPresentation = Assert.IsType<AuditPresentation>(item.Presentation);
+        var expected = AuditPresentationFormatter.Format(record.Action, record.EntityType, dataJson,
+            record.ActorType, record.ActorId);
+        Assert.True(auditPresentation.Description == expected.Description
+            && recentPresentation.Description == expected.Description,
+            "Both services must format the full JSON after materializing the bounded query.");
+        Assert.True(auditPresentation.Description.Contains("37", StringComparison.Ordinal)
+            && auditPresentation.Description.Contains("30", StringComparison.Ordinal),
+            "Structured batch count and fixed thirty-day month semantics must survive raw-summary truncation.");
+        Assert.True(auditPresentation.ActionLabel == recentPresentation.ActionLabel
+            && auditPresentation.TargetLabel.Contains("卡密批次", StringComparison.Ordinal)
+            && recentPresentation.TargetLabel.Contains("卡密批次", StringComparison.Ordinal),
+            "Audit and dashboard services must share action and object-type presentation.");
+        Assert.True(recentPresentation.ActorLabel == AuditPresentationFormatter.Format(record.Action, record.EntityType, dataJson).ActorLabel,
+            "The dashboard must not invent an actor when its existing projection has none.");
+        Assert.Empty(database.ChangeTracker.Entries());
+    }
+
+    [Fact]
     public async Task Actual_dashboard_query_generates_ordered_limited_postgresql_sql_without_json_string_operations()
     {
         var capture = new AuditQueryCapture();
@@ -295,6 +341,8 @@ public sealed class AdminAuditQueryTests
         inspection.Visit(expression);
         Assert.False(inspection.HasStringLengthOrSubstring,
             "The actual production IQueryable must project raw JSON and truncate only after materialization.");
+        Assert.False(inspection.HasPresentationFormattingOrJsonParsing,
+            "Presentation formatting and JSON parsing must remain outside the actual production IQueryable.");
     }
 
     private sealed class AuditQueryCapture : IQueryExpressionInterceptor
@@ -319,6 +367,7 @@ public sealed class AdminAuditQueryTests
         public bool HasAuditRoot { get; private set; }
         public bool HasTake { get; private set; }
         public bool HasStringLengthOrSubstring { get; private set; }
+        public bool HasPresentationFormattingOrJsonParsing { get; private set; }
 
         protected override Expression VisitExtension(Expression node)
         {
@@ -340,6 +389,12 @@ public sealed class AdminAuditQueryTests
             if (node.Method.DeclaringType == typeof(string) && node.Method.Name == nameof(string.Substring))
             {
                 HasStringLengthOrSubstring = true;
+            }
+
+            if (node.Method.DeclaringType == typeof(AuditPresentationFormatter)
+                || node.Method.DeclaringType == typeof(JsonDocument))
+            {
+                HasPresentationFormattingOrJsonParsing = true;
             }
 
             return base.VisitMethodCall(node);

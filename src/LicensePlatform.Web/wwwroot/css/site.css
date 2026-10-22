@@ -584,6 +584,99 @@ a {
   font-size: .82rem;
 }
 
+.audit-filter-actions > .btn {
+  flex: 1;
+}
+.audit-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .65rem;
+  margin-top: 1rem;
+}
+.audit-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.audit-table {
+  min-width: 50rem;
+}
+.audit-table td {
+  vertical-align: top;
+}
+.audit-table .audit-operation {
+  min-width: 13rem;
+  max-width: 24rem;
+}
+.audit-table .audit-target {
+  min-width: 9rem;
+  max-width: 16rem;
+}
+.audit-table .audit-source {
+  min-width: 10rem;
+  max-width: 16rem;
+}
+.audit-table .audit-record {
+  min-width: 11rem;
+  max-width: 22rem;
+}
+.audit-description {
+  margin-top: .4rem;
+}
+.audit-details {
+  max-width: 22rem;
+  margin-top: .5rem;
+}
+.audit-details > summary {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 2rem;
+  padding-block: .3rem;
+  color: var(--brand);
+  border-radius: 3px;
+  font-size: .82rem;
+  cursor: pointer;
+}
+.audit-details > summary:hover {
+  color: var(--brand-dark);
+  text-decoration: underline;
+}
+.audit-details > summary:focus-visible {
+  outline: 3px solid var(--brand);
+  outline-offset: 3px;
+}
+.audit-detail-list {
+  display: grid;
+  gap: .2rem;
+  margin: .5rem 0 0;
+  padding-top: .75rem;
+  border-top: 1px solid var(--line);
+  font-size: .8rem;
+}
+.audit-detail-list dt {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+.audit-detail-list dd {
+  min-width: 0;
+  margin: 0 0 .5rem;
+  overflow-wrap: anywhere;
+}
+.audit-detail-list dd, .audit-detail-list code {
+  white-space: normal;
+}
+
+@media (max-width: 575.98px) {
+  .audit-empty-actions > .btn {
+    flex: 1 1 100%;
+  }
+  .audit-table > :not(caption) > * > * {
+    padding: .85rem .7rem;
+  }
+}
+
 .badge-state {
   display: inline-flex;
   align-items: center;

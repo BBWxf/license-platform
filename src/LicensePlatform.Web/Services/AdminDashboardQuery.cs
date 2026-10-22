@@ -46,7 +46,10 @@ public sealed class AdminDashboardQuery(
             item.Action,
             item.EntityType,
             "RECORDED",
-            item.DataJson.Length > 160 ? item.DataJson.Substring(0, 160) + "…" : item.DataJson)).ToList();
+            item.DataJson.Length > 160 ? item.DataJson.Substring(0, 160) + "…" : item.DataJson)
+        {
+            Presentation = AuditPresentationFormatter.Format(item.Action, item.EntityType, item.DataJson)
+        }).ToList();
 
         return new AdminDashboardSnapshot(productCount, unused, active, expired, bindings, recent);
     }

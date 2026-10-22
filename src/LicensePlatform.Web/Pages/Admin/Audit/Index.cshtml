@@ -1,72 +1,154 @@
 @page
 @model LicensePlatform.Web.Pages.Admin.Audit.IndexModel
+@using LicensePlatform.Web.Services
 @{
     ViewData["Title"] = "审计日志";
     var totalPages = Math.Max(1, (int)Math.Ceiling(Model.Result.TotalCount / (double)Model.Result.PageSize));
+    var actionOptions = AuditPresentationFormatter.Actions;
+    var hasActionFilter = !string.IsNullOrWhiteSpace(Model.ActionFilter);
+    var hasKnownActionFilter = actionOptions.Any(option => string.Equals(option.Code, Model.ActionFilter, StringComparison.Ordinal));
 }
 
 <div class="page-heading">
     <div>
         <h1>审计日志</h1>
-        <p>追溯登录、产品、发卡、禁用、延期和解绑等管理操作，所有时间均为 UTC。</p>
+        <p>追溯管理员、授权客户端和系统的操作记录，所有时间均为 UTC。</p>
     </div>
 </div>
 
-<section class="panel filter-panel mb-4">
+<section class="panel filter-panel mb-4" aria-labelledby="audit-filter-title">
     <div class="panel-heading">
-        <h2 class="h5 mb-0">筛选事件</h2>
+        <h2 id="audit-filter-title" class="h5 mb-0">筛选事件</h2>
     </div>
-    <form method="get" class="row g-3 align-items-end">
+    <form method="get" asp-page="/Admin/Audit/Index" class="row g-3 align-items-end">
+        <input type="hidden" name="pageNumber" value="1" />
         <div class="col-md-8">
             <label class="form-label" for="action">操作类型</label>
-            <input class="form-control mono" id="action" name="action" value="@Model.ActionFilter" placeholder="例如 LICENSE.DISABLE；留空显示全部" />
+            <select class="form-select" id="action" name="action" aria-describedby="audit-action-help">
+                <option value="" selected="@(!hasActionFilter)">全部操作</option>
+                @if (hasActionFilter && !hasKnownActionFilter)
+                {
+                    <option value="@Model.ActionFilter" selected>自定义筛选（来自现有链接）</option>
+                }
+                @foreach (var group in actionOptions.GroupBy(option => option.Group))
+                {
+                    <optgroup label="@group.Key">
+                        @foreach (var option in group)
+                        {
+                            <option value="@option.Code" selected="@(string.Equals(option.Code, Model.ActionFilter, StringComparison.Ordinal))">@option.Label</option>
+                        }
+                    </optgroup>
+                }
+            </select>
+            <div id="audit-action-help" class="form-text">按中文名称选择操作。现有链接中的部分操作码筛选也会保留。</div>
         </div>
-        <div class="col-md-4 filter-actions">
-            <button class="btn btn-primary w-100" type="submit">筛选</button>
+        <div class="col-md-4 filter-actions audit-filter-actions">
+            <button class="btn btn-primary" type="submit">筛选</button>
+            <a class="btn btn-outline-secondary" asp-page="/Admin/Audit/Index">清除筛选</a>
         </div>
     </form>
 </section>
 
-<section class="panel">
+<section class="panel" aria-labelledby="audit-events-title">
     <div class="panel-heading">
-        <h2 class="h5 mb-0">事件记录</h2>
+        <div>
+            <h2 id="audit-events-title" class="h5 mb-1">事件记录</h2>
+            <p class="mb-0">“已记录”仅表示留有审计记录，不代表操作成功。技术编号可在详情中查看。</p>
+        </div>
     </div>
     @if (Model.Result.Items.Count == 0)
     {
         <div class="empty-state">
-            <h3 class="h6">没有符合条件的审计事件</h3>
-            <p>请检查操作类型，或留空查看全部记录。</p>
+            @if (Model.Result.Page > 1)
+            {
+                <h3 class="h6">这一页没有审计记录</h3>
+                <p>当前页可能已超出记录范围。可以保留筛选返回第一页，或查看全部记录。</p>
+            }
+            else
+            {
+                <h3 class="h6">没有符合条件的审计事件</h3>
+                <p>请调整操作类型，或查看全部记录。</p>
+            }
+            <div class="audit-empty-actions">
+                @if (Model.Result.Page > 1)
+                {
+                    <a class="btn btn-primary" asp-page="/Admin/Audit/Index"
+                       asp-route-action="@Model.ActionFilter" asp-route-pageNumber="1">返回第一页</a>
+                }
+                <a class="btn btn-outline-secondary" asp-page="/Admin/Audit/Index">查看全部记录</a>
+            </div>
         </div>
     }
     else
     {
-        <div class="table-responsive" role="region" aria-label="审计事件记录，可横向滚动" tabindex="0">
-            <table class="table">
+        <div class="table-responsive audit-table-scroll" role="region" aria-label="审计事件记录，可横向滚动" tabindex="0">
+            <table class="table audit-table">
                 <thead>
                 <tr>
                     <th scope="col">时间（UTC）</th>
-                    <th scope="col">操作者</th>
-                    <th scope="col">操作</th>
+                    <th scope="col">操作与说明</th>
                     <th scope="col">对象</th>
-                    <th scope="col">结果</th>
-                    <th scope="col">来源 IP</th>
-                    <th scope="col">摘要</th>
+                    <th scope="col">主体 / 来源</th>
+                    <th scope="col">记录详情</th>
                 </tr>
                 </thead>
                 <tbody>
                 @foreach (var item in Model.Result.Items)
                 {
+                    var presentation = AuditPresentationFormatter.For(item);
+                    var hasActorIdentifier = Guid.TryParse(item.Actor, out _);
+                    var sourceLabel = AuditPresentationFormatter.SourceLabel(item.SourceIp);
+                    var sourceKindLabel = sourceLabel switch
+                    {
+                        "本机管理" => "本机管理",
+                        "未记录" => "未记录",
+                        "其他来源" => "其他来源",
+                        _ => "网络请求"
+                    };
                     <tr>
-                        <td class="table-time">@item.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                        <td class="cell-id">@item.Actor</td>
-                        <td class="cell-id"><code>@item.Action</code></td>
-                        <td>
-                            <div class="cell-primary">@item.TargetType</div>
-                            <div class="cell-secondary cell-id">@item.TargetId</div>
+                        <td class="table-time"><time datetime="@(item.CreatedAt.ToUniversalTime().ToString("O"))">@item.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</time></td>
+                        <td class="audit-operation">
+                            <div class="cell-primary">@presentation.ActionLabel</div>
+                            <div class="cell-secondary audit-description">@presentation.Description</div>
                         </td>
-                        <td><span class="badge-state badge-neutral">@item.Result</span></td>
-                        <td class="cell-id"><code>@item.SourceIp</code></td>
-                        <td class="cell-summary">@(item.Summary ?? "—")</td>
+                        <td class="audit-target">@presentation.TargetLabel</td>
+                        <td class="audit-source">
+                            <div class="cell-primary">@presentation.ActorLabel</div>
+                            @if (hasActorIdentifier)
+                            {
+                                <div class="cell-secondary">编号 <span class="mono">@AuditPresentationFormatter.ShortIdentifier(item.Actor)</span></div>
+                            }
+                            <div class="cell-secondary">来源：@sourceKindLabel</div>
+                        </td>
+                        <td class="audit-record">
+                            <span class="badge-state badge-neutral">已记录</span>
+                            <details class="audit-details">
+                                <summary>查看详情<span class="visually-hidden">：@presentation.ActionLabel</span></summary>
+                                <dl class="audit-detail-list">
+                                    <dt>操作代码</dt>
+                                    <dd><code>@item.Action</code></dd>
+                                    <dt>对象类型代码</dt>
+                                    <dd><code>@item.TargetType</code></dd>
+                                    @if (!string.IsNullOrWhiteSpace(item.TargetId) && item.TargetId != "-")
+                                    {
+                                        <dt>完整对象编号</dt>
+                                        <dd><code>@AuditPresentationFormatter.FullIdentifier(item.TargetId)</code></dd>
+                                    }
+                                    @if (hasActorIdentifier)
+                                    {
+                                        <dt>完整主体编号</dt>
+                                        <dd><code>@AuditPresentationFormatter.FullIdentifier(item.Actor)</code></dd>
+                                    }
+                                    <dt>请求来源</dt>
+                                    <dd>@sourceLabel</dd>
+                                    @foreach (var detail in presentation.Details)
+                                    {
+                                        <dt>@detail.Label</dt>
+                                        <dd>@detail.Value</dd>
+                                    }
+                                </dl>
+                            </details>
+                        </td>
                     </tr>
                 }
                 </tbody>
