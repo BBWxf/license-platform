@@ -13,17 +13,18 @@ public sealed class AdminDashboardQuery(
     {
         var now = clock.UtcNow;
         var productCount = await dbContext.Products.CountAsync(cancellationToken);
-        var unused = await dbContext.LicenseKeys.LongCountAsync(
-            item => item.Status == LicenseKeyStatus.Enabled && item.ActivatedAtUtc == null,
-            cancellationToken);
-        var active = await dbContext.LicenseKeys.LongCountAsync(
-            item => item.Status == LicenseKeyStatus.Enabled
+        var licenseCounts = await dbContext.LicenseKeys
+            .AsNoTracking()
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Unused = group.LongCount(item => item.Status == LicenseKeyStatus.Enabled && item.ActivatedAtUtc == null),
+                Active = group.LongCount(item => item.Status == LicenseKeyStatus.Enabled
                     && item.ActivatedAtUtc != null
-                    && (item.ExpiresAtUtc == null || item.ExpiresAtUtc > now),
-            cancellationToken);
-        var expired = await dbContext.LicenseKeys.LongCountAsync(
-            item => item.ExpiresAtUtc != null && item.ExpiresAtUtc <= now,
-            cancellationToken);
+                    && (item.ExpiresAtUtc == null || item.ExpiresAtUtc > now)),
+                Expired = group.LongCount(item => item.ExpiresAtUtc != null && item.ExpiresAtUtc <= now)
+            })
+            .SingleOrDefaultAsync(cancellationToken);
         var bindings = await dbContext.DeviceBindings.LongCountAsync(
             item => item.UnboundAtUtc == null,
             cancellationToken);
@@ -51,6 +52,7 @@ public sealed class AdminDashboardQuery(
             Presentation = AuditPresentationFormatter.Format(item.Action, item.EntityType, item.DataJson)
         }).ToList();
 
-        return new AdminDashboardSnapshot(productCount, unused, active, expired, bindings, recent);
+        return new AdminDashboardSnapshot(productCount,
+            licenseCounts?.Unused ?? 0, licenseCounts?.Active ?? 0, licenseCounts?.Expired ?? 0, bindings, recent);
     }
 }

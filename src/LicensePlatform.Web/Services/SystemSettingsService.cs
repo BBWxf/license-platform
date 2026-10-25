@@ -23,6 +23,11 @@ public sealed class SystemSettingsService(
         var settings = await dbContext.ApplicationSettings
             .AsNoTracking()
             .Where(item => item.Key == SystemNameKey || item.Key == LogoKey)
+            .Select(item => new
+            {
+                item.Key,
+                ValueJson = item.Key == SystemNameKey ? item.ValueJson : null
+            })
             .ToListAsync(cancellationToken);
         var systemName = DeserializeString(settings.SingleOrDefault(item => item.Key == SystemNameKey)?.ValueJson)
                          ?? configuration["Branding:SystemName"]

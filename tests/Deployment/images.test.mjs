@@ -22,6 +22,21 @@ test('Dockerfile, installer and documentation agree on the verified explicit .NE
   }
 });
 
+test('local image build bounds MSBuild and restore parallelism without disabling static assets', () => {
+  const dockerfile = read('Dockerfile').replace(/\\\r?\n\s*/g, ' ');
+  const build = /^RUN dotnet restore ([^\r\n]+)$/m.exec(dockerfile)?.[1];
+  assert(build, 'The real Dockerfile must contain the restore/publish build step.');
+  const [restore, publish] = build.split('&&');
+  assert(restore.includes('--disable-parallel'));
+  assert.match(restore, /(?:^|\s)-m:1(?:\s|$)/);
+  assert(publish.includes('dotnet publish'));
+  assert.match(publish, /(?:^|\s)-m:1(?:\s|$)/);
+  assert(publish.includes('--disable-build-servers'));
+  assert(publish.includes('/p:UseSharedCompilation=false'));
+  assert(publish.includes('--no-restore'));
+  assert(!/StaticWebAssetsEnabled\s*=\s*false/i.test(dockerfile));
+});
+
 test('global.json permits the selected stable SDK feature band without a major-version roll forward', () => {
   const sdk = JSON.parse(read('global.json')).sdk;
   const minimum = sdk.version.split('.').map(Number);

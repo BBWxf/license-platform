@@ -6,11 +6,15 @@ FROM ${DOTNET_SDK_IMAGE} AS build
 WORKDIR /src
 
 COPY . .
-RUN dotnet restore src/LicensePlatform.Web/LicensePlatform.Web.csproj \
+# Bound build parallelism on small shared hosts; this does not change runtime CPU limits.
+RUN dotnet restore src/LicensePlatform.Web/LicensePlatform.Web.csproj --disable-parallel -m:1 \
     && dotnet publish src/LicensePlatform.Web/LicensePlatform.Web.csproj \
        --configuration Release \
        --no-restore \
+       --disable-build-servers \
+       -m:1 \
        --output /out \
+       /p:UseSharedCompilation=false \
        /p:UseAppHost=false
 
 FROM ${DOTNET_ASPNET_IMAGE} AS runtime
