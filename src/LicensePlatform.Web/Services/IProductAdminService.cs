@@ -6,6 +6,7 @@ public interface IProductAdminService
     Task<ProductEditor?> GetAsync(Guid id, CancellationToken cancellationToken);
     Task<Guid> SaveAsync(Guid? id, ProductEditor input, Guid actorId, string sourceIp, CancellationToken cancellationToken);
     Task SetEnabledAsync(Guid id, bool enabled, Guid actorId, string sourceIp, CancellationToken cancellationToken);
+    Task<bool> DeleteAsync(Guid id, Guid actorId, string sourceIp, CancellationToken cancellationToken);
     Task<ClientConfigDownload?> GetClientConfigAsync(Guid id, CancellationToken cancellationToken);
 }
 

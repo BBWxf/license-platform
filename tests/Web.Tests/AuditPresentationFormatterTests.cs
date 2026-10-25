@@ -19,12 +19,14 @@ public sealed class AuditPresentationFormatterTests
         ("PRODUCT.UPDATE", "Product"),
         ("PRODUCT.ENABLE", "Product"),
         ("PRODUCT.DISABLE", "Product"),
+        ("PRODUCT.DELETE", "Product"),
         ("BATCH.CREATE", "LicenseBatch"),
         ("BATCH.EXPORT_DOWNLOAD", "LicenseBatch"),
         ("BATCH.DISABLE_ALL", "LicenseBatch"),
         ("LICENSE.ENABLE", "LicenseKey"),
         ("LICENSE.DISABLE", "LicenseKey"),
         ("LICENSE.EXTEND", "LicenseKey"),
+        ("LICENSE.DELETE", "LicenseKey"),
         ("DEVICE.UNBIND", "DeviceBinding"),
         ("SETTINGS.UPDATE", "ApplicationSetting"),
         ("license.activated", "LicenseKey"),
@@ -35,10 +37,10 @@ public sealed class AuditPresentationFormatterTests
     [Fact]
     public void Every_actual_producer_action_has_a_Chinese_choice_and_the_same_shared_label()
     {
-        Assert.Equal(20, AuditPresentationFormatter.Actions.Count);
+        Assert.Equal(ProducerActions.Length, AuditPresentationFormatter.Actions.Count);
         Assert.True(ProducerActions.Select(item => item.Action).OrderBy(code => code, StringComparer.Ordinal)
             .SequenceEqual(AuditPresentationFormatter.Actions.Select(item => item.Code).OrderBy(code => code, StringComparer.Ordinal)),
-            "The selectable raw event codes must match all twenty actual producer events.");
+            "The selectable raw event codes must match all actual producer events.");
         foreach (var (action, target) in ProducerActions)
         {
             var choice = AuditPresentationFormatter.Actions.Single(item => item.Code == action);

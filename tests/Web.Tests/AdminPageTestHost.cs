@@ -40,7 +40,8 @@ public sealed class AdminPageTestHost : IAsyncDisposable
     private readonly bool _loopback;
 
     private AdminPageTestHost(AdminPageDataState state, bool loopback, ILicenseBatchAdminService? batchService,
-        IAuditAdminService? auditService, IAdminDashboardQuery? dashboardQuery)
+        IAuditAdminService? auditService, IAdminDashboardQuery? dashboardQuery,
+        IProductAdminService? productService, ILicenseAdminService? licenseService)
     {
         _loopback = loopback;
         Data = new AdminPageFixtureData(state);
@@ -107,9 +108,9 @@ public sealed class AdminPageTestHost : IAsyncDisposable
                         options.Conventions.AllowAnonymousToPage("/Account/Login");
                     }).AddApplicationPart(webAssembly);
                     services.AddSingleton<IAdminDashboardQuery>(dashboardQuery ?? Data);
-                    services.AddSingleton<IProductAdminService>(Data);
+                    services.AddSingleton<IProductAdminService>(productService ?? Data);
                     services.AddSingleton<ILicenseBatchAdminService>(batchService ?? Data);
-                    services.AddSingleton<ILicenseAdminService>(Data);
+                    services.AddSingleton<ILicenseAdminService>(licenseService ?? Data);
                     services.AddSingleton<IAuditAdminService>(auditService ?? Data);
                     services.AddSingleton<ISystemSettingsService>(Data);
                     services.AddSingleton<IAdminAuthenticationService>(Data);
@@ -156,9 +157,10 @@ public sealed class AdminPageTestHost : IAsyncDisposable
     public static async Task<AdminPageTestHost> StartAsync(
         AdminPageDataState state = AdminPageDataState.Populated, bool loopback = false,
         ILicenseBatchAdminService? batchService = null, IAuditAdminService? auditService = null,
-        IAdminDashboardQuery? dashboardQuery = null)
+        IAdminDashboardQuery? dashboardQuery = null, IProductAdminService? productService = null,
+        ILicenseAdminService? licenseService = null)
     {
-        var fixture = new AdminPageTestHost(state, loopback, batchService, auditService, dashboardQuery);
+        var fixture = new AdminPageTestHost(state, loopback, batchService, auditService, dashboardQuery, productService, licenseService);
         try
         {
             await fixture._host.StartAsync();

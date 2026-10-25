@@ -67,6 +67,27 @@
                                         @(product.Enabled ? "停用" : "启用")
                                     </button>
                                 </form>
+                                <button class="btn btn-sm btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#delete-product-@product.Id" aria-controls="delete-product-@product.Id" aria-expanded="false">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="delete-product-@product.Id">
+                        <td colspan="7">
+                            <div class="danger-panel">
+                                <h3 class="h6">确认删除产品：@product.Name</h3>
+                                <p class="small text-muted">将永久删除此产品及其全部 @product.LicenseCount 张卡密、设备绑定、激活挑战、批次、导出存档和签名密钥，无法撤销。审计记录保留。若只是暂停使用，请选择“停用”。</p>
+                                <p class="small text-muted">已下载文件和备份不会被撤回；已签发的离线租约最多可继续使用到 6 小时租约到期。</p>
+                                <form method="post" asp-page-handler="Delete">
+                                    <input type="hidden" name="id" value="@product.Id" />
+                                    <div class="form-check mb-3">
+                                        <input class="form-check-input" type="checkbox" id="delete-product-confirmed-@product.Id" name="confirmed" value="true" required />
+                                        <label class="form-check-label" for="delete-product-confirmed-@product.Id">我确认永久删除此产品及其全部卡密</label>
+                                    </div>
+                                    <div class="table-actions">
+                                        <button class="btn btn-sm btn-danger" type="submit">确认删除产品</button>
+                                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#delete-product-@product.Id" aria-controls="delete-product-@product.Id" aria-expanded="false">取消</button>
+                                    </div>
+                                </form>
                             </div>
                         </td>
                     </tr>

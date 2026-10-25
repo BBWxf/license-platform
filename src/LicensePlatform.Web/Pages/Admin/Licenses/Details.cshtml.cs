@@ -60,6 +60,29 @@ public sealed class DetailsModel(ILicenseAdminService licenseService) : PageMode
         return RedirectToPage(new { id = Id });
     }
 
+    public async Task<IActionResult> OnPostDeleteAsync(bool confirmed, CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid || Id == Guid.Empty || !confirmed || string.IsNullOrWhiteSpace(Action.Reason))
+        {
+            TempData["Error"] = "请确认永久删除，并填写不超过 300 字的删除原因。";
+            return RedirectToPage(new { id = Id });
+        }
+
+        try
+        {
+            var deleted = await licenseService.DeleteAsync(Id, Action.Reason.Trim(), GetActorId(), GetSourceIp(), cancellationToken);
+            TempData[deleted ? "Success" : "Error"] = deleted
+                ? "卡密及其设备绑定、激活挑战已删除，审计记录已保留。"
+                : "卡密不存在或已被删除。";
+            return RedirectToPage("Index");
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            TempData["Error"] = "删除未完成，数据可能正在被其他操作修改。请刷新后重试。";
+            return RedirectToPage(new { id = Id });
+        }
+    }
+
     public async Task<IActionResult> OnPostUnbindAsync(Guid bindingId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(Action.Reason))

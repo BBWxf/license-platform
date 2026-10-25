@@ -145,6 +145,8 @@ public sealed class AdminPageRenderingTests
     public static IEnumerable<object[]> PostFormContracts()
     {
         yield return ["/Admin/Products", "Toggle", new[] { "id", "enabled" }];
+        yield return ["/Admin/Products", "Delete", new[] { "id", "confirmed" }];
+        yield return [LicenseDetails, "Delete", new[] { "confirmed", "Action.Reason" }];
         yield return [ProductEdit, "", new[] { "Id", "Input.Name", "Input.LicensePrefix" }];
         yield return ["/Admin/Products/Edit", "", new[] { "Id", "Input.Name", "Input.LicensePrefix" }];
         yield return ["/Admin/Batches", "DisableAll", new[] { "id", "reason" }];

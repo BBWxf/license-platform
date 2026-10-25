@@ -200,6 +200,36 @@ public sealed class LicenseAdminService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<bool> DeleteAsync(
+        Guid id,
+        string reason,
+        Guid actorId,
+        string sourceIp,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(reason) || reason.Length > 300)
+        {
+            throw new ArgumentException("A deletion reason of at most 300 characters is required.", nameof(reason));
+        }
+
+        var license = await dbContext.LicenseKeys.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (license is null)
+        {
+            return false;
+        }
+
+        dbContext.LicenseKeys.Remove(license);
+        AddAudit(actorId, "LICENSE.DELETE", "LicenseKey", id, sourceIp, clock.UtcNow, new
+        {
+            productId = license.ProductId,
+            batchId = license.BatchId,
+            reason = reason.Trim()
+        });
+        // Bindings/challenges cascade; the batch's original issuance archive is intentionally retained.
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     public async Task UnbindAsync(
         Guid bindingId,
         string reason,

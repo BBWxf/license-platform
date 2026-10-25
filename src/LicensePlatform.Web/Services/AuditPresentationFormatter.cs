@@ -31,12 +31,14 @@ public static class AuditPresentationFormatter
         new AuditActionOption("PRODUCT.UPDATE", "更新产品", "产品管理"),
         new AuditActionOption("PRODUCT.ENABLE", "启用产品", "产品管理"),
         new AuditActionOption("PRODUCT.DISABLE", "停用产品", "产品管理"),
+        new AuditActionOption("PRODUCT.DELETE", "删除产品", "产品管理"),
         new AuditActionOption("BATCH.CREATE", "生成卡密批次", "卡密批次"),
         new AuditActionOption("BATCH.EXPORT_DOWNLOAD", "准备导出卡密", "卡密批次"),
         new AuditActionOption("BATCH.DISABLE_ALL", "禁用整批卡密", "卡密批次"),
         new AuditActionOption("LICENSE.ENABLE", "恢复卡密使用", "卡密与设备"),
         new AuditActionOption("LICENSE.DISABLE", "禁用卡密", "卡密与设备"),
         new AuditActionOption("LICENSE.EXTEND", "延长卡密有效期", "卡密与设备"),
+        new AuditActionOption("LICENSE.DELETE", "删除卡密", "卡密与设备"),
         new AuditActionOption("DEVICE.UNBIND", "解除设备绑定", "卡密与设备"),
         new AuditActionOption("license.activated", "首次激活卡密", "客户端授权"),
         new AuditActionOption("lease.reissued", "重新签发租约", "客户端授权"),
@@ -149,11 +151,13 @@ public static class AuditPresentationFormatter
         "PRODUCT.UPDATE" => "更新了产品配置。",
         "PRODUCT.ENABLE" => "将产品设为启用状态。",
         "PRODUCT.DISABLE" => "将产品设为停用状态。",
+        "PRODUCT.DELETE" => "永久删除了产品及其卡密、批次、导出存档和签名密钥，保留审计记录。",
         "BATCH.CREATE" => "生成了一批卡密；数量和有效期以已记录的信息为准。",
         "BATCH.EXPORT_DOWNLOAD" => "已准备卡密 CSV 导出文件，不代表浏览器已保存。",
         "BATCH.DISABLE_ALL" => "对批次中的卡密执行了整批禁用。",
         "LICENSE.ENABLE" => "恢复卡密为可用状态，不重置原有效期。",
         "LICENSE.DISABLE" => "将卡密设为禁用状态。",
+        "LICENSE.DELETE" => "永久删除了卡密及其设备绑定和激活挑战，保留审计记录和原始批次导出快照。",
         "LICENSE.EXTEND" => "增加卡密的总有效期；未记录的到期时间不代表永久。",
         "DEVICE.UNBIND" => "解除设备绑定，保留卡密原有总有效期。",
         "SETTINGS.UPDATE" => "更新了系统品牌显示设置。",
@@ -185,6 +189,14 @@ public static class AuditPresentationFormatter
                 {
                     description = $"{(code == "PRODUCT.CREATE" ? "创建" : "更新")}产品“{name}”。";
                 }
+                break;
+            case "PRODUCT.DELETE":
+                AddText(details, root, "Name", "记录中的产品名称");
+                AddText(details, root, "Code", "产品编码");
+                break;
+            case "LICENSE.DELETE":
+                AddGuid(details, root, "productId", "产品编号");
+                AddGuid(details, root, "batchId", "原始批次编号");
                 break;
             case "BATCH.CREATE":
                 AddGuid(details, root, "productId", "产品编号");

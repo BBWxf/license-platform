@@ -67,6 +67,8 @@ internal sealed class AdminPageFixtureData : IAdminDashboardQuery, IProductAdmin
 
     Task IProductAdminService.SetEnabledAsync(Guid id, bool enabled, Guid actorId, string sourceIp, CancellationToken cancellationToken) => ReadOnly();
 
+    Task<bool> IProductAdminService.DeleteAsync(Guid id, Guid actorId, string sourceIp, CancellationToken cancellationToken) => ReadOnly<bool>();
+
     Task<ClientConfigDownload?> IProductAdminService.GetClientConfigAsync(Guid id, CancellationToken cancellationToken) =>
         Task.FromResult<ClientConfigDownload?>(null);
 
@@ -111,6 +113,7 @@ internal sealed class AdminPageFixtureData : IAdminDashboardQuery, IProductAdmin
 
     Task ILicenseAdminService.SetEnabledAsync(Guid id, bool enabled, string reason, Guid actorId, string sourceIp, CancellationToken cancellationToken) => ReadOnly();
     Task ILicenseAdminService.ExtendAsync(Guid id, AdminValidityKind kind, int units, string reason, Guid actorId, string sourceIp, CancellationToken cancellationToken) => ReadOnly();
+    Task<bool> ILicenseAdminService.DeleteAsync(Guid id, string reason, Guid actorId, string sourceIp, CancellationToken cancellationToken) => ReadOnly<bool>();
     Task ILicenseAdminService.UnbindAsync(Guid bindingId, string reason, Guid actorId, string sourceIp, CancellationToken cancellationToken) => ReadOnly();
 
     Task<AuditSearchResult> IAuditAdminService.SearchAsync(int page, int pageSize, string? action, CancellationToken cancellationToken) =>

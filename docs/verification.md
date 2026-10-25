@@ -219,3 +219,18 @@ node --test tests/Deployment/*.test.mjs
 - 变更 C# 的限定 `dotnet format --verify-no-changes --no-restore --include ...`、临时 Node 驱动语法、两个改动文档中的本地链接（1 个）以及 `git diff --check` 均通过。浏览器、loopback host 和 smoke 进程均已退出，只清理各自创建的临时会话，不操作用户服务。若后续要长期复用本机 SDK/Chrome 的隔离启动方式，建议用 `/run-skill-generator` 固化这套已有预览流程。
 
 未执行：真实 PostgreSQL 查询/事务/迁移、真实管理员密码登录及生产业务端到端、其他浏览器、独立 Linux/容器运行时或线上部署；未重新执行本轮未改的客户端、领域及 Integration 套件，不将历史通过数合并为本次成绩。Docker 实机测试仍按既定范围排除，不作为待补完成条件；未操作原 8080 服务。本轮仅本地修改，未提交、推送或部署。
+
+## 14. 产品与卡密删除功能补齐
+
+执行日期：2026-10-25。原产品和卡密页面仅提供启停、编辑、延期/解绑，没有删除表单、POST handler 或业务服务方法。补齐产品列表的删除确认区，以及授权查询到详情删除区的入口；产品删除同时删除其全部卡密、批次和签名密钥，并利用既有数据库 Cascade 清除绑定、挑战和批次导出。单卡删除保留同批其他卡密及原始发行 CSV 快照，界面明确说明导出不恢复已删除卡密。保留历史审计并新增两种中文删除事件，不修改模型或迁移。
+
+已执行：
+
+- 旧代码删除表单回归先复现 **2 项失败、9 项通过**，失败信息为 `The expected management handler form must be rendered.`，确认是功能缺失而非已证实的浏览器故障。
+- 临时 SDK 曾缺少 `NuGet.CommandLine.XPlat.runtimeconfig.json`；使用已有官方 SDK ZIP 完整解压到新的独立目录，保留旧目录，不安装系统 SDK。新目录 SDK 10.0.108 / 实际运行时 .NET 10.0.8，沿用第 1 节的本机 workaround。
+- 最终完整 `Web.Tests`：**348 项通过、0 失败、2 项明确跳过**，相较上一节新增 35 项通过及 2 项 opt-in PostgreSQL 测试。真实 Razor/Cookie/防伪链路验证删除表单、确认/原因校验、真实 POST 到 spy、操作者不能由表单冒充、重定向、缺失目标和并发冲突的安全提示；匿名、撤销 Cookie、缺 token 和 GET 不调用删除。原页面渲染、标签/ID、所有现有测试同时通过。
+- 真实管理服务使用隔离 InMemory，覆盖删除范围、跨产品/同批隔离、保留发行数量/原始归档字节/历史审计、追加安全审计、重复或不存在目标、原因边界、保存前失败和过期版本拒绝。InMemory 删除测试显式加载依赖，仅验证 **EF 跟踪级联**，不冒充数据库级联或事务回滚。
+- 两项新增 PostgreSQL 18 测试在独立随机 schema 中使用正式迁移，覆盖未加载依赖的真实级联，以及在保存前制造目标版本冲突后验证整个删除事务和新增审计回滚。默认没有 `LICENSE_PLATFORM_TEST_DATABASE_FILE` 配置，因此本轮均 **Skipped**，没有实际连接数据库。复现入口：`dotnet test tests/Web.Tests/Web.Tests.csproj --configuration Release --filter FullyQualifiedName~AdminDeletionServiceTests.PostgreSql`，secret 文件约束同第 3 节。
+- 初次新增服务测试将审计 IP 属性误写为 `SourceIp`，修正为实际 `IpAddress`；完整回归发现旧审计测试固定为 20 种事件，补齐两种新事件后重新构建及完整测试通过。没有禁用分析器或降低断言。
+
+未执行：真实 PostgreSQL 删除/事务/并发、浏览器实机点击、生产业务数据删除、Docker、线上部署或原 8080 服务操作；未重新运行不相关客户端/领域/Integration 套件。此次修改仅在本地工作区，未提交、推送或部署。删除不撤回备份、已下载/在途文件和已签发离线租约，不能承诺立即离线失效。

@@ -112,6 +112,35 @@ public sealed class ProductAdminService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<bool> DeleteAsync(Guid id, Guid actorId, string sourceIp, CancellationToken cancellationToken)
+    {
+        var product = await dbContext.Products.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (product is null)
+        {
+            return false;
+        }
+
+        var licenses = await dbContext.LicenseKeys.Where(item => item.ProductId == id).ToListAsync(cancellationToken);
+        var batches = await dbContext.LicenseBatches.Where(item => item.ProductId == id).ToListAsync(cancellationToken);
+        var signingKeys = await dbContext.ProductSigningKeys.Where(item => item.ProductId == id).ToListAsync(cancellationToken);
+
+        dbContext.LicenseKeys.RemoveRange(licenses);
+        dbContext.LicenseBatches.RemoveRange(batches);
+        dbContext.ProductSigningKeys.RemoveRange(signingKeys);
+        dbContext.Products.Remove(product);
+        AddAudit(actorId, "PRODUCT.DELETE", id, sourceIp, clock.UtcNow, new
+        {
+            product.Code,
+            product.Name,
+            licenseCount = licenses.Count,
+            batchCount = batches.Count
+        });
+        // One SaveChanges transaction deletes restricted dependents and records the audit together.
+        // Database cascades remove bindings, challenges and batch export archives.
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<ClientConfigDownload?> GetClientConfigAsync(Guid id, CancellationToken cancellationToken)
     {
         var product = await dbContext.Products

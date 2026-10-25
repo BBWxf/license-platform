@@ -195,5 +195,24 @@
                 </div>
             </form>
         </section>
+
+        <section class="panel danger-panel mt-4" id="delete-license">
+            <div class="panel-heading">
+                <h2 class="h5 mb-0">删除卡密</h2>
+            </div>
+            <p class="cell-secondary">永久删除此卡密及其全部设备绑定、激活挑战，无法撤销。审计记录和同批其他卡密不受影响。</p>
+            <p class="cell-secondary">批次导出仍是原始签发快照，可能包含已删除卡密，但不能使其重新激活。已签发的离线租约最多可继续使用到 6 小时租约到期。</p>
+            <form method="post" asp-page-handler="Delete">
+                <div class="mb-3">
+                    <label class="form-label" for="delete-reason">删除原因</label>
+                    <textarea asp-for="Action.Reason" id="delete-reason" class="form-control" rows="2" maxlength="300" required></textarea>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="delete-license-confirmed" name="confirmed" value="true" required />
+                    <label class="form-check-label" for="delete-license-confirmed">我确认永久删除此卡密</label>
+                </div>
+                <button class="btn btn-danger w-100" type="submit">确认删除卡密</button>
+            </form>
+        </section>
     </div>
 </div>

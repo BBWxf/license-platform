@@ -6,6 +6,7 @@ public interface ILicenseAdminService
     Task<LicenseDetails?> GetAsync(Guid id, CancellationToken cancellationToken);
     Task SetEnabledAsync(Guid id, bool enabled, string reason, Guid actorId, string sourceIp, CancellationToken cancellationToken);
     Task ExtendAsync(Guid id, AdminValidityKind kind, int units, string reason, Guid actorId, string sourceIp, CancellationToken cancellationToken);
+    Task<bool> DeleteAsync(Guid id, string reason, Guid actorId, string sourceIp, CancellationToken cancellationToken);
     Task UnbindAsync(Guid bindingId, string reason, Guid actorId, string sourceIp, CancellationToken cancellationToken);
 }
 
